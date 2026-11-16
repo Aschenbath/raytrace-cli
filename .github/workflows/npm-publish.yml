@@ -1,0 +1,92 @@
+name: Publish npm package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing stable release tag to publish (for example v0.13.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && (github.event_name == 'workflow_dispatch' || !github.event.release.prerelease)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@raytrace-cli/cli
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Ensure npm supports trusted publishing
+        run: npm install --global npm@11
+
+      - name: Validate release and check npm registry
+        id: package
+        shell: bash
+        run: |
+          node --input-type=module <<'JS'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const { name, version, repository } = JSON.parse(readFileSync('package.json', 'utf8'));
+          if (name !== '@raytrace-cli/cli' || !/^\d+\.\d+\.\d+$/.test(version)) {
+            throw new Error('Expected the RayTrace CLI package with a stable version.');
+          }
+          if (process.env.RELEASE_TAG !== `v${version}`) {
+            throw new Error(`Tag ${process.env.RELEASE_TAG} does not match package version ${version}.`);
+          }
+          const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/${version}`);
+          if (response.status !== 200 && response.status !== 404) {
+            throw new Error(`Registry check failed: HTTP ${response.status}`);
+          }
+          const exists = response.status === 200;
+          if (!exists && repository?.url !== 'git+https://github.com/Godcreatebugs/raytrace-cli.git') {
+            throw new Error('The release must include repository.url for npm provenance.');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `exists=${exists}\n`);
+          if (exists) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${name}@${version} is already on npm; skipped publishing.\n`);
+          }
+          JS
+
+      - name: Install dependencies
+        if: steps.package.outputs.exists == 'false'
+        run: npm ci
+
+      - name: Typecheck
+        if: steps.package.outputs.exists == 'false'
+        run: npm run typecheck
+
+      - name: Test
+        if: steps.package.outputs.exists == 'false'
+        run: npm test
+
+      # prepack builds the dashboard before publishing. Authentication uses OIDC;
+      # no NPM_TOKEN or NODE_AUTH_TOKEN secret is needed.
+      - name: Publish to npm
+        if: steps.package.outputs.exists == 'false'
+        run: npm publish --access public
