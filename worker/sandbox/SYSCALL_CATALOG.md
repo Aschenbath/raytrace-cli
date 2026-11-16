@@ -87,7 +87,7 @@ infer them from the collector host.
 | `capture` | Meaning | Rows |
 | --- | --- | --- |
 | `yes` | Its gVisor trace point is subscribed, with the optional fields in `capture_fields`. | `open`, `openat`, `creat`, `connect`, `listen`, `setuid`, `setgid`, `setresuid`, `setresgid` |
-| `watcher` | Only its raw exit point is subscribed: which process, when, and whether it was refused. gVisor does not decode its path, so the host's file watcher supplies the name. | `unlink`, `unlinkat`, `rmdir`, `rename`, `renameat`, `renameat2`, `truncate`, `ftruncate`, `mkdir`, `mkdirat`, `chmod`, `fchmod`, `fchmodat` |
+| `watcher` | Its raw points are subscribed: which process, when, and whether it was refused. Both of them, because gVisor fills the exit event's process and sandbox from the fields asked of the enter point; the enter event itself is discarded. gVisor does not decode its path, so the host's file watcher supplies the name. | `unlink`, `unlinkat`, `rmdir`, `rename`, `renameat`, `renameat2`, `truncate`, `ftruncate`, `mkdir`, `mkdirat`, `chmod`, `fchmod`, `fchmodat` |
 | `sentry` | Seen through gVisor's own process points (clone, exec, exit), whatever syscall caused them. | `clone`, `clone3`, `fork`, `vfork`, `execve`, `execveat`, `exit`, `exit_group` |
 | `no` | Not captured. | everything else |
 
@@ -150,7 +150,7 @@ outcome. A missing exit result is unknown, not success. Apply the row-specific
 | `connect_effect` | Decode the address family, IP address and port. A zero result is a connection on a stream socket and only a default peer on a datagram socket. `EINPROGRESS` is an attempt whose outcome this call does not report. A destination in a range the sandbox firewall rejects is a refused attempt. The address is never a host name: a name shown beside it comes from DNS evidence and is a best match. No payload is captured. |
 | `listen_effect` | Success means the process accepts connections on the bound address. Nothing outside the sandbox network is routed to it. |
 | `identity_effect` | Record the requested IDs and the result. Success changes the identity the process acts as; the sandbox has no capabilities, so a successful change away from its one user is unexpected, and a failure is an attempt. |
-| `process_lifecycle` | gVisor's clone, exec and exit points report every task, program start and exit, whichever syscall caused it. A successful exec proves a program started, not what it did; a zero result on the exec syscall point is not treated as success. Keep arguments as observed and, of the environment, only the two `RAYTRACE_` markers. |
+| `process_lifecycle` | gVisor's clone, exec and exit points report every task, program start and exit, whichever syscall caused it. A successful exec proves a program started, not what it did; a zero result on the exec syscall point is not treated as success, since gVisor's execve returns 0 before it loads the program. A missing or non-executable program is therefore inferred: an attempt no program start follows, by the time the process tries other arguments or exits, is recorded as `exec_failed` with no errno (`collector.py` `ExecAttempts`). Keep arguments as observed and, of the environment, only the two `RAYTRACE_` markers. |
 | `not_classified` | The call is listed and grouped, and nothing is collected for it. No fact records its use and none rules it out. |
 
 For example, successful `unlinkat` can display **L3 · Delete · Succeeded**;

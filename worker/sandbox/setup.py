@@ -73,6 +73,15 @@ def trace_config(arch, catalog_sql, endpoint, calls=True):
         fields = [field for field in json.loads(wanted) if field in json.loads(offered or '[]')] if capture == 'yes' else []
         if fields:
             entry['optional_fields'] = fields
+        if capture == 'watcher':
+            # gVisor fills a raw exit event's context (which sandbox, which
+            # process, when) from the fields asked of the same call's raw
+            # ENTER point (kernel/task_syscall.go: the exit path reads
+            # SyscallRawEnter's field set). With only the exit subscribed the
+            # event names nobody, and the engine cannot say who deleted or
+            # renamed a file. So the enter point is subscribed with the same
+            # fields; the collector reads its exit and discards the enter.
+            configured.append({'name': f'syscall/sysno/{number[name]}/enter', 'context_fields': entry['context_fields']})
         configured.append(entry)
     # gVisor never waits long for the collector: when its socket is full it
     # tries again a few times, each wait twice the last (25 microseconds at
