@@ -110,8 +110,25 @@ Each release goes to npm (`@raytrace-cli/cli`) and PyPI (`raytrace-cli`) at
 the same version. The pip package is the npm package plus an official Node.js
 build, one wheel per platform. PyPI does not allow the name `raytrace`.
 
-Bump the version (`npm version x.y.z`), push the `vx.y.z` tag, `npm publish`,
-then build the same version's wheels and upload them:
+Bump the version (`npm version x.y.z`), push the commit and `vx.y.z` tag,
+then publish a stable GitHub Release for that tag. `npm-publish.yml` checks the
+tag against `package.json`, runs typechecking and tests, builds the dashboard
+through `prepack`, and publishes to npm. It uses the `npm` GitHub environment
+and npm trusted publishing (OIDC), with no npm token secret. The package's
+`repository.url` must match `Godcreatebugs/raytrace-cli` for provenance.
+
+The npm trusted publisher must specify owner `Godcreatebugs`, repository
+`raytrace-cli`, workflow `npm-publish.yml`, environment `npm`, and allow
+`npm publish`. A newly configured publisher must complete its first actual
+publish within two days; otherwise recreate the expired connection on npm.
+
+For a retry, run **Publish npm package** from the Actions tab and enter the
+existing release tag. Already published versions are skipped, including
+`v0.13.0`; registry errors fail the job instead of attempting a publish.
+Prereleases are excluded from automatic publishing. Merging this workflow
+does not retroactively run it for releases that were already published.
+
+Then build the same version's pip wheels and upload them:
 
 ```sh
 python3 python/build_wheels.py    # all six platforms, into python/dist/
