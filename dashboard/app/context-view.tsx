@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Context: what the model had in context for one prompt, in three boxes.
 //   A  what you asked before, in the same conversation
@@ -181,7 +182,7 @@ export function ContextView({ trace, stepKey, onStep, onRerunWithout }: {
     </header>
     {data && <ContextWindow data={data} />}
     {error && <p role="alert" className="verify-error">{error}</p>}
-    {!data && !error && <p className="rt-empty">Loading the context…</p>}
+    {!data && !error && <LoadingState label="Loading the context…" />}
     {data && <div className="rt-boxes">
       <section className="rt-box">
         <h2><span>A</span> You asked before</h2>

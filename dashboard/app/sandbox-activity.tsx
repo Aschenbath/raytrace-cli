@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // What the sandbox's kernel layer saw the agent do (worker/gvisor/engine.py),
 // as the control plane collected it: the connections it made, the packages it
@@ -92,7 +93,7 @@ export function SandboxActivity({ box, stepFor, onOpenCall }: {
   }, [box]);
 
   if (error && !data) return <p role="alert" className="rt-problem">{error}</p>;
-  if (!data) return <p className="rt-empty">Loading…</p>;
+  if (!data) return <LoadingState label="Loading sandbox activity…" />;
   const reached = new Set(data.network.map((fact) => fact.host).filter(Boolean));
   const unreached = data.lookups.filter((fact) => !reached.has(fact.name));
   const nothing = !data.network.length && !data.packages.length && !data.files.length && !data.lookups.length && !data.bulk.length && !data.identity.length;

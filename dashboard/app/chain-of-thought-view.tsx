@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Chain of thought: why each tool call was made. For every call, the likely
 // causes among what the agent could see (your request, an earlier result,
@@ -185,7 +186,7 @@ function StepCard({ call, index, trace, states, chain, highlight, number, onJump
 }
 
 function Explanation({ state, number, onJump }: { state: AttributionState | undefined; number: (callId: string) => number | null; onJump: (callId: string) => void }) {
-  if (!state || state.status === 'loading') return <p className="rt-cot-note">Working out why…</p>;
+  if (!state || state.status === 'loading') return <LoadingState label="Working out why…" compact />;
   if (state.status === 'error') return <p className="rt-cot-note">{state.message}</p>;
   const { attribution } = state;
   return <>

@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 import {CaptureHealthStatus} from './capture-health';
 import type {CaptureHealth} from './types';
 import { useEffect, useState } from 'react';
@@ -297,7 +298,7 @@ export function RuntimeEvidence({ sandboxId, prompt, runtime, open, onOpenChange
       <p className="chain-note">Observed by the sandbox kernel layer, independent of anything the agent reported.
         A successful exec proves a program started, not that its output or the answer is correct.</p>
       {error && <p role="alert" className="verify-error">{error}</p>}
-      {!data && !error && <p className="chain-note">Loading…</p>}
+      {!data && !error && <LoadingState label="Loading recorded processes…" />}
 
       {data && raw && <>
         <p className="chain-note">Every recorded event, unfolded. <button type="button" className="link-button" onClick={() => setRaw(false)}>Back to commands</button></p>

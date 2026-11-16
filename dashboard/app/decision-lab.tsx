@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 import { useEffect, useState } from 'react';
 import type { ContextItem } from './types';
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
@@ -86,7 +87,7 @@ export function DecisionLab({ selected, focusCallId = null }: { selected?: Selec
   return <aside className="fork-panel lab decision-lab">
     <span className="eyebrow">COUNTERFACTUAL LAB</span><h2>Explore this decision</h2>
     {!step && !loading && !error && <p>Select a proposed tool call or model answer in the sequence.</p>}
-    {loading && <output>Loading the context before this step…</output>}
+    {loading && <LoadingState label="Loading the context before this step…" compact />}
     {error && <p className="experiment-error" role="alert">{error}</p>}
     {step && <>
       <section className="step-focus"><small>SELECTED STEP</small><h3>{selected?.title}</h3><p>{selected?.detail}</p></section>

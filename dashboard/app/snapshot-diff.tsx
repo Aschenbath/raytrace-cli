@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // One file's (or the whole project's) diff between two snapshots of the
 // sandbox's project folder, and the patch download built on it. The server
@@ -102,7 +103,7 @@ export function SnapshotDiff({ sandbox, from, to, path }: { sandbox?: string; fr
   }, [sandbox, from, to, path]);
   if (!sandbox) return <p className="rt-files-note">No sandbox holds this snapshot, so there is no diff to load.</p>;
   if (error) return <p className="rt-files-note">{error}</p>;
-  if (!patch) return <p className="rt-files-note">Loading diff…</p>;
+  if (!patch) return <LoadingState label="Loading diff…" compact />;
   return <>
     {patch.diff ? <DiffText diff={patch.diff} /> : <pre className="rt-diff">(no difference)</pre>}
     {patch.truncated && <p className="rt-files-note">This diff is larger than the 500 KB the snapshot view returns, so it is cut off here — and a patch downloaded from it would be incomplete.</p>}

@@ -685,3 +685,82 @@ select.rt-level{appearance:none;font-family:inherit;padding:2px 8px;cursor:point
 .rt-search-help code{font:11px var(--mono);color:light-dark(#3a3c40,#d0d1d4)}
 .rt-legend-item i{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 4px 0 10px}
 @media(max-width:900px){.rt-search-body{grid-template-columns:1fr}.rt-hit-main{grid-template-columns:1fr 64px}.rt-hit-main small,.rt-hit-error{grid-column:1/-1}}
+
+/* Small state transitions inspired by Amicro's status capsule and confirmation.
+   Native controls and CSS keep this independent of an animation runtime. */
+.rt-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.capture-health{margin:0 0 16px;font-size:11px;color:var(--muted)}
+.rt-capture-summary{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rt-capture-capsule{display:inline-flex;align-items:center;gap:9px;padding:8px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--ink);font-size:11px;transition:background .2s,border-color .2s,border-radius .3s cubic-bezier(.22,1,.36,1);text-align:left}
+.rt-capture-capsule:hover{border-color:var(--muted)}
+.rt-capture-capsule:focus-visible,.rt-copy-button:focus-visible{outline:2px solid var(--violet);outline-offset:3px}
+.rt-capture-capsule[aria-expanded=true]{border-radius:13px}
+.rt-capture-divider{padding:0 3px;color:var(--muted)}
+.rt-capture-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--muted)}
+.rt-capture-capsule[data-tone=live] .rt-capture-dot{background:light-dark(#24815c,#66d6a8);box-shadow:0 0 0 4px light-dark(#e0f1e9,#1c372d)}
+.rt-capture-capsule[data-tone=warning] .rt-capture-dot{background:light-dark(#9e6514,#ffc26a);box-shadow:0 0 0 4px light-dark(#f8eddb,#382b19)}
+.rt-capture-chevron{transition:transform .25s}
+.rt-capture-capsule[aria-expanded=true] .rt-capture-chevron{transform:rotate(180deg)}
+.rt-capture-history{font-size:11px}
+.rt-capture-drawer{display:grid;grid-template-rows:0fr;opacity:0;visibility:hidden;transition:grid-template-rows .3s cubic-bezier(.22,1,.36,1),opacity .2s,visibility .3s}
+.rt-capture-drawer[data-open=true]{grid-template-rows:1fr;opacity:1;visibility:visible}
+.rt-capture-drawer>div{overflow:hidden;min-height:0}
+.rt-capture-details{margin-top:8px;padding:12px 14px;border:1px solid var(--line);border-radius:13px;background:var(--panel);display:grid;gap:8px;line-height:1.5}
+.rt-capture-details>span{display:flex;align-items:center;gap:7px}
+.rt-capture-details small{font-size:11px}
+.rt-capture-details summary{cursor:pointer}
+.rt-capture-warning{margin:8px 0 0;color:light-dark(#81520d,#edbf77);line-height:1.5}
+.rt-copy-control{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap}
+.rt-copy-button{min-width:82px;justify-content:center;transition:color .2s,border-color .2s,background .2s}
+.rt-copy-button[data-state=copied]{color:light-dark(#207a53,#79dbb2);border-color:light-dark(#aed8c6,#35644f);background:light-dark(#edf7f1,#192b23)}
+.rt-copy-error{font-size:11px;color:light-dark(#a02832,#f2a6ae);max-width:260px}
+@media(prefers-reduced-motion:reduce){.rt-capture-capsule,.rt-capture-chevron,.rt-capture-drawer,.rt-copy-button{transition:none}}
+.rt-capture-caveat{display:block;margin-top:7px;font-size:11px;line-height:1.5}
+
+/* Amicro button geometry, state morphs and wave physics in the live dashboard. */
+.rt-motion-button{min-height:36px;gap:9px;padding:8px 15px;border-radius:999px;background:light-dark(#f5f5f7,#1b1c21);border-color:light-dark(#dcdde1,#303139);box-shadow:inset 0 1px 1px light-dark(#fff,#ffffff0a);font-size:12px;line-height:18px;text-decoration:none;transition:background .18s,border-color .18s,transform .18s}
+.rt-motion-button:hover{background:light-dark(#ebecf0,#24252b);border-color:light-dark(#b9bdc6,#4b4d57);transform:translateY(-1px)}
+.rt-motion-button:active{transform:scale(.96)}
+.rt-motion-button:focus-visible,.rt-motion-theme:focus-visible{outline:2px solid var(--violet);outline-offset:3px}
+.rt-motion-button:disabled{opacity:.5;cursor:default;transform:none}
+.rt-morph-icon{position:relative;display:inline-block;width:16px;height:16px;flex:none}
+.rt-morph-icon>span{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.rt-star-spark{position:absolute;display:flex;line-height:1}
+.rt-star-spark.one{top:-8px;right:-7px;color:light-dark(#b5820c,#fde68a)}
+.rt-star-spark.two{top:0;left:-7px;color:light-dark(#b5820c,#facc15)}
+.rt-github-star:hover .rt-morph-icon,.rt-github-star:focus-visible .rt-morph-icon{color:light-dark(#a77305,#facc15)}
+.rt-share-button:hover .rt-morph-icon,.rt-share-button:focus-visible .rt-morph-icon{color:light-dark(#2667b2,#7ab7ff)}
+.rt-share-button{min-width:130px}
+.rt-copy-button[data-state=copied] .rt-morph-icon{color:light-dark(#207a53,#79dbb2)}
+.rt-motion-theme{display:grid;place-items:center;flex:none;width:36px;height:36px;border:1px solid var(--line);border-radius:50%;background:var(--panel);color:var(--ink);cursor:pointer}
+[data-theme=dark] .rt-motion-theme{color:#f3d784}
+.rt-nav-tools{display:grid;gap:8px;width:100%;margin:10px 0 8px}
+.rt-nav-tools>.rt-copy-control,.rt-nav-tools .rt-button{width:100%;justify-content:center}
+.rt-network-status{display:flex;gap:8px;align-items:center;min-width:0;padding:8px 11px;min-height:36px;border:1px solid var(--line);border-radius:999px;background:var(--panel);font-size:11px;color:var(--muted)}
+.rt-network-status span:last-child{overflow-wrap:anywhere}
+.rt-network-status[data-state=connected]{color:light-dark(#237c58,#78d9b2)}
+.rt-network-status[data-state=offline]{color:light-dark(#a33040,#ed96a5)}
+.rt-network-status[data-state=pending] .rt-morph-icon{animation:rt-network-pending 1.2s ease-in-out infinite}
+@keyframes rt-network-pending{50%{opacity:.3}}
+.rt-delete-button:hover,.rt-delete-button:focus-visible{color:light-dark(#ad3343,#f28d9b);border-color:light-dark(#ddaab2,#773d49)}
+.rt-delete-icon{display:flex;transform-origin:center}
+.rt-delete-button:hover:not(:disabled) .rt-delete-icon,.rt-delete-button:focus-visible .rt-delete-icon{animation:rt-delete-shake .3s ease-in-out}
+@keyframes rt-delete-shake{25%{transform:translateY(-2px) rotate(-10deg)}50%{transform:rotate(10deg)}75%{transform:translateY(-2px) rotate(-10deg)}}
+.rt-loading-state{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;min-height:230px;padding:28px 16px;color:var(--muted);font-size:12px;line-height:1.5;text-align:center;max-width:100%}
+.rt-wave-stage{height:144px;width:min(100%,292px);position:relative;display:flex;align-items:flex-end;justify-content:center;overflow:visible}
+.rt-wave-track{position:relative;display:flex;align-items:flex-end;gap:8px;height:136px;width:292px;flex:none}
+.rt-wave-bar{width:12px;border-radius:999px;transform-origin:bottom;flex:none}
+.rt-wave-ball{position:absolute;width:12px;height:12px;border-radius:50%;z-index:1}
+.rt-loading-state.compact{min-height:138px;padding:12px;gap:8px}
+.rt-loading-state.compact .rt-wave-stage{height:88px}
+.rt-loading-state.compact .rt-wave-track{transform:scale(.65);transform-origin:bottom center}
+@media(max-width:420px){.rt-wave-track{transform:scale(.75);transform-origin:bottom center}}
+@media(prefers-reduced-motion:reduce){.rt-motion-button{transition:none}.rt-motion-button:hover,.rt-motion-button:active{transform:none}.rt-delete-button .rt-delete-icon,.rt-network-status[data-state=pending] .rt-morph-icon{animation:none}}
+.rt-capture-explanation{margin:0;max-width:75ch;line-height:1.6}
+.rt-actions>.rt-copy-control .rt-share-button{min-width:0}
+
+.nav-status{display:grid;grid-template-columns:minmax(0,1fr) 32px 32px;gap:6px;align-items:center}
+.nav-status>.rt-motion-theme{width:32px;height:32px}
+.nav-status .rt-network-status{padding-inline:8px}
+.rt-motion-theme.rt-wave-motion-toggle{color:var(--muted)}
+.rt-wave-motion-toggle[aria-pressed=true]{color:light-dark(#237c58,#78d9b2);border-color:light-dark(#aed8c6,#35644f)}

@@ -33,7 +33,8 @@ import { SandboxView } from './sandbox-view';
 import { SandboxesView } from './sandboxes-view';
 import { ResizeHandle } from './resize-handle';
 import { api } from './api';
-import { setTheme, useTheme } from './theme';
+import { ConnectionStatus, GitHubStarLink, ThemeButton, WaveAnimationButton } from './motion/controls';
+import { LoadingState } from './loading-state';
 
 export type View = 'prompts' | 'search' | 'story' | 'sandboxes' | 'scan' | 'calls' | 'changes' | 'sandbox' | 'context' | 'thought' | 'playground';
 type Place = { view: View; trace: string; call: string | null; step: string | null; box: string; q: string };
@@ -73,7 +74,6 @@ export function Dashboard({ views = VIEWS, offline = 'PROXY OFFLINE', footer = n
   const [place, setPlace] = useState<Place>({ view: 'prompts', trace: '', call: null, step: null, box: '', q: '' });
   const [navSearch, setNavSearch] = useState('');
   const shell = useRef<HTMLElement>(null);
-  const theme = useTheme();
 
   useEffect(() => {
     setPlace(readPlace(views));
@@ -139,7 +139,7 @@ export function Dashboard({ views = VIEWS, offline = 'PROXY OFFLINE', footer = n
   ] as { view: View; label: string; icon: typeof Wrench }[]).filter((item) => shows(item.view));
 
   function noPrompt() {
-    if (!loaded && place.trace) return <section className="rt-view"><p className="rt-empty">Loading…</p></section>;
+    if (!loaded && place.trace) return <section className="rt-view"><LoadingState label="Loading recorded prompts…" /></section>;
     return <section className="rt-view"><p className="rt-empty">
       {loaded && place.trace && !trace ? 'That prompt is no longer in the loaded history.' : 'Choose a prompt first.'}{' '}
       <button type="button" className="link-button" onClick={() => go({ view: 'prompts' })}>Go to Prompts</button>
@@ -166,9 +166,11 @@ export function Dashboard({ views = VIEWS, offline = 'PROXY OFFLINE', footer = n
       </div>}
       {/* Nothing is known until the first load answers (the whole history,
           which can take a second): neither connected nor offline yet. */}
-      <div className="nav-bottom"><div className="nav-status"><span className={`status ${!loaded ? 'pending' : connected ? '' : 'offline'}`}><i />{!loaded ? 'CONNECTING…' : connected ? 'CONNECTED' : offline}</span>
-        <button type="button" className="theme-toggle" onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')} aria-pressed={theme === 'dark'}
-          aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`} title={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}>◐</button></div>{footer}</div>
+      <div className="nav-bottom">
+        <div className="rt-nav-tools"><GitHubStarLink /></div>
+        <div className="nav-status"><ConnectionStatus loaded={loaded} connected={connected} offline={offline} /><WaveAnimationButton /><ThemeButton /></div>
+        {footer}
+      </div>
       <ResizeHandle target={shell} variable="--nav-width" storageKey="raytace.nav-width" min={180} max={480} label="Navigation width" />
     </aside>
 

@@ -1,4 +1,6 @@
 'use client';
+import { LoadingState } from './loading-state';
+import { DeleteButton } from './motion/controls';
 
 // Sandboxes: every sandbox RayTrace has made, grouped by the VM it runs on,
 // and what was asked in each. The list comes from the sandbox manager; each
@@ -7,8 +9,9 @@
 // evidence outlives them.
 import { useEffect, useState } from 'react';
 import { api } from './api';
-import { ArrowRight, Copy, ScanSearch, Server } from 'lucide-react';
+import { ArrowRight, ScanSearch, Server } from 'lucide-react';
 import { NewSandbox } from './new-sandbox';
+import { CopyButton } from './copy-button';
 import { type Trace } from './types';
 
 
@@ -58,7 +61,6 @@ export function SandboxesView({ traces, selectedId, onSelect, onOpenTrace, onOpe
 }) {
   const [boxes, setBoxes] = useState<Sandbox[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState('');
   const [destroying, setDestroying] = useState('');
   const [destroyError, setDestroyError] = useState('');
   // Bumped to list again at once, after a sandbox is created here.
@@ -91,7 +93,6 @@ export function SandboxesView({ traces, selectedId, onSelect, onOpenTrace, onOpe
   });
   const created = (box: Sandbox) => typeof box.created === 'number' ? box.created * 1000 : Date.parse(box.created);
 
-  const copy = (text: string) => { void navigator.clipboard?.writeText(text); setCopied(text); setTimeout(() => setCopied(''), 1500); };
 
   const [pendingDestroy, setPendingDestroy] = useState<Sandbox | null>(null);
 
@@ -113,7 +114,7 @@ export function SandboxesView({ traces, selectedId, onSelect, onOpenTrace, onOpe
     {canCreate && <NewSandbox onCreated={(id) => { setListed((count) => count + 1); (onOpenScan ?? onSelect)(id); }} />}
     {error && <p className="rt-empty">{error}</p>}
     {destroyError && <p className="rt-empty">{destroyError}</p>}
-    {!error && boxes === null && <p className="rt-empty">Loading…</p>}
+    {!error && boxes === null && <LoadingState label="Loading your sandboxes…" />}
     {!error && boxes?.length === 0 && <p className="rt-empty">No sandboxes yet. {canCreate ? 'Drop a project folder above, or from' : 'From'} a Git repository: <code>raytrace sandbox create</code></p>}
     {hosts.map((host) => {
       const label = hostLabel(host);
@@ -150,17 +151,17 @@ export function SandboxesView({ traces, selectedId, onSelect, onOpenTrace, onOpe
                 </dl>
                 {box.status !== 'deleted' && box.on_host && <div className="rt-shell-line">
                   <code>{shell}</code>
-                  <button type="button" className="rt-button" onClick={() => copy(shell)}><Copy size={13} /> {copied === shell ? 'Copied' : 'Copy'}</button>
+                  <CopyButton text={shell} />
                 </div>}
                 {box.host === 'lima' && <div className="rt-shell-line">
                   <code>raytrace sandbox destroy {box.name || box.id}</code>
-                  <button type="button" className="rt-button" onClick={() => copy(`raytrace sandbox destroy ${box.name || box.id}`)}><Copy size={13} /> {copied === `raytrace sandbox destroy ${box.name || box.id}` ? 'Copied' : 'Copy'}</button>
+                  <CopyButton text={`raytrace sandbox destroy ${box.name || box.id}`} />
                 </div>}
                 {box.host === 'lima' && <p className="rt-foot">Run the first command in a terminal to open this sandbox, then start <code>claude</code> or <code>codex</code> there.
                   The second deletes it, and asks whether to delete the logs recorded in it too.</p>}
                 {box.host !== 'lima' && box.status !== 'deleted' && box.on_host && <div className="rt-shell-line">
                   <code>Destroy this sandbox and stop anything running in it. Its recorded evidence stays.</code>
-                  <button type="button" className="rt-button" disabled={destroying === box.id} onClick={() => setPendingDestroy(box)}>{destroying === box.id ? 'Destroying…' : 'Destroy'}</button>
+                  <DeleteButton disabled={destroying === box.id} onClick={() => setPendingDestroy(box)}>{destroying === box.id ? 'Destroying…' : 'Destroy'}</DeleteButton>
                 </div>}
                 {box.host !== 'lima' && box.status !== 'deleted' && box.on_host && <p className="rt-foot">Run it in a terminal to open this sandbox, then start <code>claude</code> or <code>codex</code> there.
                   Needs the RayTrace CLI, signed in as this account: <code>npm install -g @raytrace-cli/cli@latest</code>.
@@ -199,7 +200,7 @@ export function SandboxesView({ traces, selectedId, onSelect, onOpenTrace, onOpe
         <p>“{pendingDestroy.name || pendingDestroy.id}” stops and is deleted. Its recorded evidence stays.</p>
         <div className="rt-dialog-actions">
           <button type="button" className="rt-button" autoFocus disabled={Boolean(destroying)} onClick={() => setPendingDestroy(null)}>No</button>
-          <button type="button" className="rt-button rt-danger" disabled={Boolean(destroying)} onClick={() => void destroy(pendingDestroy)}>{destroying ? 'Destroying…' : 'Yes, destroy'}</button>
+          <DeleteButton className="rt-danger" disabled={Boolean(destroying)} onClick={() => void destroy(pendingDestroy)}>{destroying ? 'Destroying…' : 'Yes, destroy'}</DeleteButton>
         </div>
     </dialog>}
   </section>;

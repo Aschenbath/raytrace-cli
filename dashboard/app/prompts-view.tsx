@@ -1,4 +1,6 @@
 'use client';
+import { LoadingState } from './loading-state';
+import { SharePromptButton } from './copy-button';
 import {CaptureHealthStatus} from './capture-health';
 
 // Prompts: what was asked and what came back. Everything about how the agent
@@ -48,7 +50,8 @@ export function PromptsView({ traces, loaded = true, box = '', onBox, selectedId
     </span>
       <small>{shown.length} prompt{shown.length === 1 ? '' : 's'}</small>
     </div>
-    {!shown.length && <p className="rt-empty">{loaded ? box ? 'No prompts from this sandbox yet. Ask Claude Code something in it and it will appear here.' : 'No prompts captured yet. Send a request through the proxy and it will appear here.' : 'Loading…'}</p>}
+    {!loaded && <LoadingState label="Loading recorded prompts…" />}
+    {loaded && !shown.length && <p className="rt-empty">{box ? 'No prompts from this sandbox yet. Ask Claude Code something in it and it will appear here.' : 'No prompts captured yet. Send a request through the proxy and it will appear here.'}</p>}
     <ol className="rt-prompts">
       {shown.map((trace) => {
         const open = trace.id === selectedId;
@@ -71,6 +74,7 @@ export function PromptsView({ traces, loaded = true, box = '', onBox, selectedId
               <button type="button" className="rt-button" onClick={() => onOpen('calls', trace.id)}>Tool calls <ArrowRight size={14} /></button>
               {trace.sandboxId && canOpen('sandbox') && <button type="button" className="rt-button" onClick={() => onOpen('sandbox', trace.id)}>Sandbox evidence <ArrowRight size={14} /></button>}
               {canOpen('context') && <button type="button" className="rt-button" onClick={() => onOpen('context', trace.id)}>Context <ArrowRight size={14} /></button>}
+              <SharePromptButton traceId={trace.id} />
             </div>
           </div>}
         </li>;
