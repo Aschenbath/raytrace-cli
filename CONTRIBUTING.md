@@ -110,8 +110,27 @@ Each release goes to npm (`@raytrace-cli/cli`) and PyPI (`raytrace-cli`) at
 the same version. The pip package is the npm package plus an official Node.js
 build, one wheel per platform. PyPI does not allow the name `raytrace`.
 
-Bump the version (`npm version x.y.z`), push the commit and `vx.y.z` tag,
-then publish a stable GitHub Release for that tag. `npm-publish.yml` checks the
+Every PR merged into `main` automatically increments the patch version,
+creates a release commit and tag, creates a GitHub Release, and publishes npm.
+Before merging, use one optional PR label to override the default:
+
+| Label | Increment |
+|---|---|
+| no label or `release:patch` | `0.13.0` → `0.13.1` |
+| `release:minor` | `0.13.0` → `0.14.0` |
+| `release:major` | `0.13.0` → `1.0.0` |
+| `release:skip` | no version change or publishing |
+
+Only one release label is allowed; conflicting or unknown release labels fail
+without creating a release. Add labels before merging. The workflow queues
+merged PRs instead of cancelling earlier queued releases (up to GitHub's
+100-run queue limit). Rerunning the same merged-PR workflow reuses its release
+commit and tag. Version commits and tags are pushed atomically, with a retry
+if main advances. The bot needs permission to push release commits to main;
+branch protections must permit this if added later. Releases use the latest
+main when their queued run starts, so they can include other already merged PRs.
+
+`npm-publish.yml` checks the
 tag against `package.json`, runs typechecking and tests, builds the dashboard
 through `prepack`, and publishes to npm. It uses the `npm` GitHub environment
 and npm trusted publishing (OIDC), with no npm token secret. The package's
@@ -125,8 +144,13 @@ publish within two days; otherwise recreate the expired connection on npm.
 For a retry, run **Publish npm package** from the Actions tab and enter the
 existing release tag. Already published versions are skipped, including
 `v0.13.0`; registry errors fail the job instead of attempting a publish.
-Prereleases are excluded from automatic publishing. Merging this workflow
-does not retroactively run it for releases that were already published.
+Prereleases are excluded from automatic publishing. Already published Releases
+are not triggered retroactively. To retry a failed automatic release, rerun
+its merged-PR workflow; to retry publishing an existing tag, use the manual
+publish action. Bot-created tags explicitly dispatch the pip wheels build,
+because GitHub does not trigger tag workflows for GITHUB_TOKEN pushes.
+PyPI uploading remains manual. Merging the automation PR itself produces a
+patch release unless that PR has `release:skip`.
 
 Then build the same version's pip wheels and upload them:
 

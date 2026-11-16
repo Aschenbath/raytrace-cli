@@ -1,6 +1,11 @@
 name: Publish npm package
 
 on:
+  # Use the trusted base-branch workflow for merged PRs, including forks.
+  # Only main is checked out; unmerged PR code is never executed.
+  pull_request_target:
+    branches: [main]
+    types: [closed]
   release:
     types: [published]
   workflow_dispatch:
@@ -15,11 +20,54 @@ permissions:
 
 concurrency:
   group: npm-publish
-  cancel-in-progress: false
+  queue: max
 
 jobs:
+  prepare-release:
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name == 'pull_request_target' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Configure release commit author
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Bump version and push release tag
+        id: release
+        run: node .github/scripts/prepare-npm-release.mjs
+
+      - name: Create GitHub Release and build pip wheels
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --title "RayTrace CLI $RELEASE_TAG" --generate-notes
+          fi
+          # GITHUB_TOKEN pushes do not trigger tag workflows. Dispatch this
+          # explicitly; the wheels are built for download, not uploaded to PyPI.
+          gh workflow run pip.yml --ref "$RELEASE_TAG"
+
   publish:
-    if: github.repository == 'Godcreatebugs/raytrace-cli' && (github.event_name == 'workflow_dispatch' || !github.event.release.prerelease)
+    needs: prepare-release
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && ((needs.prepare-release.result == 'success' && needs.prepare-release.outputs.tag != '') || github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -30,7 +78,7 @@ jobs:
       id-token: write
       deployments: write
     env:
-      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      RELEASE_TAG: ${{ needs.prepare-release.outputs.tag || github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
