@@ -1,7 +1,11 @@
 """Raw-call context and failed execs. Run: python3 -B -m unittest discover -s worker/sandbox -p 'test_*.py'"""
 import json
+import os
 from pathlib import Path
+import sqlite3
 import sys
+import tempfile
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).parent))
@@ -52,6 +56,115 @@ class RawCalls(unittest.TestCase):
         self.assertEqual((fact['path'], fact['effect'], fact['intent'], fact['pid'], fact['call_id']),
                          ('config/keys.js', 'attempted', 'delete', 41, 'call_9'))
         self.assertEqual(box.raw[0]['who']['pid'], 41)
+
+
+class WhoChangedIt(unittest.TestCase):
+    """engine.look(): a change goes to the process that made it, not to
+    whoever opened that name before."""
+    def setUp(self):
+        self.now = 1000.0
+        self.engine = engine.Engine(':memory:', arch='aarch64', watch=False, clock=lambda: self.now)
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.box = engine.Sandbox('c' * 64)
+        self.box.workspace, self.box.ip = self.folder.name, '172.30.60.3'
+        self.write('keys.js', 'one')
+        self.box.guarded = {'keys.js': 'watched'}
+        self.box.photos['keys.js'] = engine.photo(self.folder.name, 'keys.js')
+        for pid, name in ((10, 'python3'), (20, 'sed'), (30, 'truncate')):
+            self.box.processes[pid] = {'start_ns': str(pid), 'ppid': 1, 'name': name, 'argv': [name], 'call_id': f'call_{pid}'}
+
+    def write(self, name, text):
+        (Path(self.folder.name) / name).write_text(text)
+
+    def opened(self, pid, name='keys.js', flags=engine.O_TRUNC | 1):
+        self.engine.opened(self.box, {'kind': 'open', 'pathname': '/workspace/' + name, 'flags': flags, 'errno': 0, 'pid': pid,
+                                      'ppid': 1, 'process_start_ns': str(pid), 'timestamp_ns': str(time.time_ns()), 'sysno': 56})
+
+    def call(self, pid, sysno, errno=0):
+        self.engine.numbered_call(self.box, {'kind': 'syscall_return', 'sysno': sysno, 'errno': errno, 'pid': pid, 'ppid': 1,
+                                             'process_start_ns': str(pid), 'timestamp_ns': str(time.time_ns()), 'cwd': '/workspace'})
+
+    def changed(self, *words):
+        self.engine.noticed(self.box, 'keys.js', list(words))
+        self.engine.look(self.box, 'keys.js')
+        return [fact for fact in self.engine.facts.values() if fact['kind'] == 'file' and fact['effect'] not in ('read', 'opened_for_writing')]
+
+    def earlier_writer(self):
+        """Process 10 writes the file, exits, and its change is recorded."""
+        self.opened(10)
+        self.write('keys.js', 'two')
+        self.engine.exited(self.box, {'pid': 10, 'process_start_ns': '10'})
+        (fact,) = self.changed('modify', 'close_write')
+        self.assertEqual((fact['pid'], fact['certainty']), (10, 'confirmed'))
+        self.engine.facts.clear()
+        self.now += 60
+
+    def test_a_writer_that_exited_is_not_credited_with_a_later_change(self):
+        self.earlier_writer()
+        self.write('keys.js', 'three')
+        (fact,) = self.changed('modify', 'close_write')
+        self.assertEqual((fact['pid'], fact['certainty']), (None, 'unattributed'))
+
+    def test_exit_brings_the_look_forward(self):
+        self.opened(10)
+        self.box.due.clear()
+        self.engine.exited(self.box, {'pid': 10, 'process_start_ns': '10'})
+        self.assertIn('keys.js', self.box.due)
+
+    def test_a_file_moved_over_it_is_the_movers(self):
+        self.earlier_writer()
+        self.opened(10)                 # another process still has the name open
+        self.write('keys.js', 'by sed')
+        self.call(20, 38)               # renameat
+        (fact,) = self.changed('moved_to', 'close_write')
+        self.assertEqual((fact['pid'], fact['call_id'], fact['certainty'], fact['basis']['syscall']), (20, 'call_20', 'confirmed', 'renameat'))
+
+    def test_truncate_is_the_truncaters(self):
+        self.earlier_writer()
+        self.write('keys.js', '')
+        self.call(30, 45)               # truncate
+        (fact,) = self.changed('modify')
+        self.assertEqual((fact['effect'], fact['pid'], fact['certainty']), ('emptied', 30, 'confirmed'))
+
+    def test_a_write_through_a_symbolic_link_or_a_hard_link(self):
+        for make in (lambda: os.symlink('keys.js', Path(self.folder.name) / 'alias'),
+                     lambda: os.link(Path(self.folder.name) / 'keys.js', Path(self.folder.name) / 'alias')):
+            with self.subTest():
+                make()
+                self.opened(20, 'alias')
+                (Path(self.folder.name) / 'alias').write_text('through ' + str(self.now))
+                (fact,) = self.changed('modify', 'close_write')
+                self.assertEqual((fact['pid'], fact['certainty'], fact['basis']['resolution'], fact['basis']['via']), (20, 'confirmed', 'link', 'alias'))
+                self.engine.facts.clear()
+                self.box.aliases.clear()
+                os.unlink(Path(self.folder.name) / 'alias')
+                self.now += 60
+
+    def test_a_link_out_of_the_project_is_not_followed(self):
+        os.symlink('/etc/hostname', Path(self.folder.name) / 'alias')
+        self.opened(20, 'alias')
+        self.write('keys.js', 'someone')
+        (fact,) = self.changed('modify', 'close_write')
+        self.assertEqual(fact['certainty'], 'unattributed')
+
+    def test_a_folder_argument_reaches_its_files_only_for_a_file_tool(self):
+        self.box.guarded = {'src/a.js': 'watched', 'src/b.js': 'watched'}
+        script = {'name': 'python3', 'argv': ['python3', 'run.py', 'src']}
+        self.assertEqual(self.engine.named(self.box, script, '/workspace'), [])
+        self.assertEqual(self.engine.named(self.box, {'name': 'rm', 'argv': ['rm', '-r', 'src']}, '/workspace'),
+                         [('src/a.js', 'argv_folder'), ('src/b.js', 'argv_folder')])
+        self.assertEqual(self.engine.named(self.box, {'name': 'python3', 'argv': ['python3', 'run.py', 'src/a.js']}, '/workspace'), [('src/a.js', 'argv')])
+
+    def test_a_connection_to_its_own_address_is_the_sandbox_talking_to_itself(self):
+        event = {'kind': 'connect', 'family': 'inet', 'ip': '172.30.60.3', 'port': 18082, 'errno': 0, 'pid': 10, 'ppid': 1, 'process_start_ns': '10'}
+        self.engine.connected(self.box, event)
+        self.assertEqual(self.engine.facts, {})
+        self.engine.db = sqlite3.connect(':memory:')
+        self.engine.db.executescript(engine.SCHEMA)
+        self.engine.connected(self.box, {**event, 'ip': '172.30.60.9'})   # another machine in that range
+        (fact,) = self.engine.facts.values()
+        self.assertEqual(fact['outcomes'], {'refused_by_policy': 1})
 
 
 class FailedExecs(unittest.TestCase):

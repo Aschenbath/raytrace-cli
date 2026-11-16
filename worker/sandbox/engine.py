@@ -89,6 +89,10 @@ WRITER_LIFE = 900               # how long an open for writing may explain a lat
 RAW_WINDOW = (2_000_000_000, 1_000_000_000)   # ns a delete or rename call may precede, or follow, the watcher's notice
 BULK = 200                      # opens from which a step is worth one summary line
 RETAIN_DAYS, RETAIN_ROWS = 14, 50_000
+ALIAS_WINDOW = 5_000_000_000    # ns before a change within which an open of another name may be a link to the file
+# Programs whose folder argument reaches the files under it. Any other program
+# naming a folder (a script given its working folder) says nothing of them.
+FOLDER_TOOLS = frozenset(['rm', 'rmdir', 'mv', 'cp', 'chmod', 'chown', 'chgrp', 'find', 'rsync', 'shred', 'unlink', 'truncate'])
 PACKAGE_TOOLS = frozenset(['npm', 'npx', 'pnpm', 'yarn', 'bun', 'pip', 'pip3', 'uv', 'poetry'])
 REGISTRIES = frozenset(['registry.npmjs.org', 'registry.yarnpkg.com', 'pypi.org', 'files.pythonhosted.org'])
 MAX_PACKAGES = 400
@@ -304,6 +308,7 @@ class Sandbox:
         self.final = {}          # path -> when to stop waiting for a change
         self.causes = {}         # path -> what the watcher saw of it since the last look
         self.raw = collections.deque(maxlen=512)   # recent delete, rename, resize and mode calls: they carry no path
+        self.aliases = collections.deque(maxlen=256)   # recent opens for writing of files not kept: one may be a link to a kept file
         self.watches = {}        # folder -> inotify watch
         self.counts = {}         # step -> opens that were only counted
         self.packages = None     # what was installed when last looked
@@ -567,6 +572,16 @@ class Engine(threading.Thread):
 
     def exited(self, box, event):
         gone = box.processes.pop(event.get('pid'), None)
+        # A process that has exited writes nothing more. Whatever it did to a
+        # file it had open is looked at now, and after that look it is no
+        # longer a candidate: a change an hour later is not its doing.
+        pid, now = event.get('pid'), self.clock()
+        for path, writers in box.writers.items():
+            for writer in writers:
+                if (writer['who'].get('pid') == pid and not writer.get('gone')
+                        and writer['who'].get('start_ns') in (None, event.get('process_start_ns'))):
+                    writer['gone'] = True
+                    box.due[path] = min(box.due.get(path, now + SETTLE), now + SETTLE)
         if gone and box.workspace and PACKAGE_TOOLS & {posixpath.basename(part) for part in gone['argv'][:4]}:
             # A package manager finished: see what it left, once it has settled.
             box.package_due = self.clock() + 1
@@ -679,6 +694,8 @@ class Engine(threading.Thread):
                     self.arm(box)
                     guard = 'sensitive'
             if guard is None:
+                if writing and not errno and box.guarded:
+                    box.aliases.append({'path': path, 'who': who, 'at_ns': at_ns, 'syscall': self.calls.get(event.get('sysno'), ('open', 'open'))[0]})
                 return self.counted(box, who, top, at_ns)
         call = self.calls.get(event.get('sysno'), ('open', 'open'))[0]
         basis = {'syscall': call, 'flags': flags, 'resolution': 'lexical'}
@@ -731,9 +748,10 @@ class Engine(threading.Thread):
             at = name[len(WORKSPACE):]   # empty for the project folder itself: `rm -r .` names everything
             if at in box.guarded:
                 found[at] = 'argv'
-            for path in box.guarded:   # `rm -r src` reaches every file under src
-                if not at or path.startswith(at + '/'):
-                    found.setdefault(path, 'argv_folder')
+            if who.get('name') in FOLDER_TOOLS:
+                for path in box.guarded:   # `rm -r src` reaches every file under src
+                    if not at or path.startswith(at + '/'):
+                        found.setdefault(path, 'argv_folder')
         if not found:
             text = ' '.join(who.get('argv') or [])
             found = {path: 'argv_text' for path in box.guarded if path in text}
@@ -800,7 +818,9 @@ class Engine(threading.Thread):
             return
         cause = box.causes.pop(path, None) or {'events': set(), 'at_ns': time.time_ns()}
         now = self.clock()
-        writers = box.writers[path] = [writer for writer in box.writers.get(path, []) if now - writer['seen'] < WRITER_LIFE]
+        # Not a writer that exited and has had its look since: see exited().
+        writers = box.writers[path] = [writer for writer in box.writers.get(path, [])
+                                       if now - writer['seen'] < WRITER_LIFE and not writer.get('settled')]
         before = box.photos.get(path)
         after = photo(box.workspace, path, box.hashing)
         flags = 0
@@ -811,25 +831,38 @@ class Engine(threading.Thread):
             box.photos[path] = after
             if after is None and box.known is not None:
                 box.known.discard(path)
+            via = None
             if effect in ('deleted', 'renamed'):
                 found = self.actors(box, 'remove' if effect == 'deleted' else 'rename', cause['at_ns'], path)
             elif effect == 'permissions_changed':
                 found = self.actors(box, 'metadata', cause['at_ns'], path)
             else:
-                found, seen = [], set()
+                opened, seen = [], set()
                 for writer in reversed(writers):   # the latest to open it first
                     key = (writer['who']['pid'], writer['who']['start_ns'])
                     if key not in seen:
                         seen.add(key)
-                        found.append((writer['who'], writer['syscall']))
+                        opened.append((writer['who'], writer['syscall']))
                     writer['credited'] = True
-                if 'moved_to' in cause['events']:   # written elsewhere and moved over it, as editors and `sed -i` do
-                    found += self.actors(box, 'rename', cause['at_ns'], path)
+                found = None
+                if 'moved_to' in cause['events']:
+                    # Written elsewhere and moved over it, as editors and `sed -i`
+                    # do: the bytes are the mover's, whoever opened this name before.
+                    found = self.actors(box, 'rename', cause['at_ns'], path)
+                elif 'close_write' not in cause['events']:
+                    # Changed with nobody closing it: truncate(2), which opens
+                    # nothing, ahead of whoever still has it open.
+                    found = self.actors(box, 'resize', cause['at_ns'], path) + opened
+                found = found or opened
                 if not found:
-                    found = self.actors(box, 'resize', cause['at_ns'], path)
+                    link = self.linked(box, path, after, cause['at_ns'])
+                    if link:
+                        found, via = [(link['who'], link['syscall'])], link['path']
             who, call = found[0] if found else ({}, None)
             certainty = 'unattributed' if not found else 'confirmed' if len(found) == 1 else 'one_of'
             basis = {'syscall': call, 'watcher': sorted(cause['events']), 'before': before, 'after': after, 'resolution': 'lexical'}
+            if via:
+                basis.update(resolution='link', via=via, note='opened under another name that is a link to this file')
             if len(found) > 1:
                 basis['candidates'] = [{'pid': other['pid'], 'process': other['name']} for other, _ in found[:5]]
             fact = self.fact(box, 'file', (path, effect, certainty), who,
@@ -845,8 +878,43 @@ class Engine(threading.Thread):
                               {'path': path, 'guard': guard, 'effect': 'opened_for_writing', 'certainty': 'possible',
                                'basis': {'syscall': writer['syscall'], 'flags': writer['flags'], 'before': before, 'after': after,
                                          'resolution': 'lexical', 'note': 'opened for writing; the file is as it was'}}, writer['at_ns'])
+        for writer in writers:
+            if writer.get('gone'):
+                writer['settled'] = True
         if not writers:
             box.writers.pop(path, None)
+
+    def linked(self, box, path, after, at_ns):
+        """A recent open for writing of another name that is this file: a hard
+        link to it (the same inode) or a symbolic link whose text leads to it.
+        Links are read, never followed: the text is worked out as a path."""
+        for other in reversed(box.aliases):
+            if not at_ns - ALIAS_WINDOW <= other['at_ns'] <= at_ns + RAW_WINDOW[1]:
+                continue
+            name = other['path']
+            for _ in range(8):   # a link to a link, a few deep
+                if name == path:
+                    return other
+                try:
+                    folder = open_inside(box.workspace, posixpath.dirname(name), directory=True) if posixpath.dirname(name) else os.open(box.workspace, os.O_RDONLY | os.O_DIRECTORY)
+                except (OSError, ValueError):
+                    break
+                try:
+                    info = os.stat(posixpath.basename(name), dir_fd=folder, follow_symlinks=False)
+                    if not stat.S_ISLNK(info.st_mode):
+                        if after and stat.S_ISREG(info.st_mode) and info.st_ino == after['inode']:
+                            return other
+                        break
+                    target = os.readlink(posixpath.basename(name), dir_fd=folder)
+                except OSError:
+                    break
+                finally:
+                    os.close(folder)
+                target = posixpath.normpath(target if target.startswith('/') else posixpath.join(WORKSPACE, posixpath.dirname(name), target))
+                if not target.startswith(WORKSPACE):
+                    break
+                name = target[len(WORKSPACE):]
+        return None
 
     # ------------------------------------------------------------ network, identity, packages
 
@@ -873,8 +941,11 @@ class Engine(threading.Thread):
         there = ipaddress.ip_address(ip)
         at_ns = int(event.get('timestamp_ns') or 0) or time.time_ns()
         listening = event['kind'] == 'listen'
-        if not listening and (there.is_loopback or there.is_unspecified):
-            return   # the sandbox talking to itself
+        if not listening and (there.is_loopback or there.is_unspecified or ip == box.ip):
+            # The sandbox talking to itself, by loopback or by its own address:
+            # that one is in a range the firewall rejects for other machines,
+            # and it never leaves the sandbox to be rejected.
+            return
         if not listening and port == 0:
             # No traffic: the resolver library "connects" a datagram socket to each
             # address a name answered with, port 0, to choose which to use.
