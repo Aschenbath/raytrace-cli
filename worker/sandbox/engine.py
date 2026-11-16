@@ -356,6 +356,8 @@ class Engine(threading.Thread):
         try:
             kind = event.get('kind')
             own = kind in OWN_KINDS or (kind in ('syscall_return', 'syscall_enter') and event.get('sysno') in self.numbered)
+            if own and kind == 'syscall_enter':
+                return True   # subscribed only so that its exit names the process (setup.py): nothing to keep
             if own or kind in PROCESS_KINDS:
                 try:
                     self.inbox.put_nowait(event)

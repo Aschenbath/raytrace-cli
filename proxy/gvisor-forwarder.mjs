@@ -135,7 +135,9 @@ export function toFailedExec(event, clock = UNMEASURED_CLOCK) {
     timestamp: observed - clock.offsetMs,
     start_time_ns: typeof event.process_start_ns === 'string' ? event.process_start_ns : null,
     status: 'failed',
-    error: `exec failed: errno ${Number.isFinite(Number(event.errno)) ? Number(event.errno) : 'unknown'}`,
+    // The collector infers a failure gVisor reports no errno for (a missing or
+    // non-executable program): errno is null there, never 0.
+    error: `exec failed: ${event.errno != null && Number.isFinite(Number(event.errno)) ? `errno ${Number(event.errno)}` : 'no program started (errno not reported)'}`,
     ended_at: at,
     container_id: typeof event.container_id === 'string' ? event.container_id : null,
     raw: event,

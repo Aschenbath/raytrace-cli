@@ -313,6 +313,8 @@ test('a failed execve under a matched command gets its own failed row instead of
   assert.equal(descended[0].exec.ended_at, new Date(BASE + 5).toISOString());
   assert.equal(tracker.live.has(101), false, 'nothing ran, so nothing is tracked');
   assert.equal(toFailedExec({ ...failed, argv: [], executable: '' }), null);
+  // Inferred by the collector: gVisor gave no errno, and null must not read as errno 0.
+  assert.equal(toFailedExec({ ...failed, errno: null }).error, 'exec failed: no program started (errno not reported)');
 });
 
 test('an exit with no in-memory link (proxy restarted) is closed by pid + start time', async () => {

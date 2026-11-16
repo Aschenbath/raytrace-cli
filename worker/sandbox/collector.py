@@ -225,6 +225,69 @@ def with_raw(event, packet):
     return event
 
 
+class ExecAttempts:
+    """Tells a failed exec from the events around it, one sandbox at a time.
+
+    gVisor never reports that an exec failed for want of a program. Its execve
+    returns 0 at once and loads the program afterwards (kernel/task_exec.go),
+    so the call's exit point says errno 0 whether the file was there or not,
+    and a missing or non-executable file only shows as what does not follow:
+    no `exec_succeeded` (sentry/execve) for that process. So an attempt is
+    held until the process says which it was:
+
+        exec_succeeded   the attempt, and any before it with the same
+                         arguments (a shell trying each folder of PATH), led
+                         to a program: nothing failed
+        another attempt  with other arguments: the held ones failed
+        process_exit     the held ones failed
+
+    A failure found this way is an `exec_failed` event with no errno (gVisor
+    gave none) and `inferred` saying why. The folders of one PATH search are
+    one failure, listed in `tried`, not one each. An attempt still held when
+    the stream ends is dropped: nothing says how it went."""
+    LIMIT = 20_000
+
+    def __init__(self):
+        self.held = {}   # pid -> [the attempts since its last program started]
+
+    def see(self, event):
+        """The failed execs this event settles, as events to record."""
+        kind, pid = event.get('kind'), event.get('pid')
+        if kind == 'exec_attempt':
+            held = self.held.get(pid)
+            failed = self.failures(self.held.pop(pid)) if held and held[-1].get('argv') != event.get('argv') else []
+            if len(self.held) >= self.LIMIT:   # exits that never arrived
+                self.held.clear()
+            self.held.setdefault(pid, []).append(event)
+            return failed
+        if kind == 'exec_failed':
+            # gVisor did report this one (a bad pointer, a path too long): it is recorded as it came.
+            held = self.held.get(pid)
+            if held:
+                held.pop()
+                if not held:
+                    del self.held[pid]
+            return []
+        if kind == 'exec_succeeded':
+            self.held.pop(pid, None)
+            return []
+        if kind == 'process_exit':
+            return self.failures(self.held.pop(pid, []))
+        return []
+
+    @staticmethod
+    def failures(attempts):
+        found = []
+        for attempt in attempts:
+            if found and found[-1].get('argv') == attempt.get('argv'):
+                if len(found[-1]['tried']) < 32:
+                    found[-1]['tried'].append(attempt.get('executable'))
+                continue
+            found.append({**attempt, 'kind': 'exec_failed', 'errno': None, 'tried': [attempt.get('executable')],
+                          'inferred': 'no program started after this exec attempt; gVisor reports no errno for it'})
+        return found
+
+
 def init_db(path):
     db = sqlite3.connect(path, timeout=10)
     db.execute('PRAGMA journal_mode=WAL')
@@ -386,6 +449,7 @@ def serve(endpoint, database):
             record({'kind': 'collector_connected', 'source': 'collector'})
             previous_dropped = 0
             previous_received = int(time.time()*1000)
+            attempts = ExecAttempts()
             while True:
                 packet, _, flags, _ = conn.recvmsg(MAX_PACKET)
                 if not packet:
@@ -402,6 +466,8 @@ def serve(endpoint, database):
                     taken(gap)
                     previous_dropped = event['dropped_count']
                 previous_received = int(time.time()*1000)
+                for failed in attempts.see(event):
+                    record(failed)
                 if not taken(event):
                     record(with_raw(event, packet))
         except Exception as error:

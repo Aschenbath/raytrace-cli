@@ -56,7 +56,11 @@ function previewOf(item) {
  * Never upgrades missing evidence into an outcome. */
 function processOutcome(row) {
   if (!row?.process_id) return { status: null, error: null };
-  if (!row.exec_ok && row.failed_errno != null) return { status: 'failed', error: `exec failed: errno ${row.failed_errno}` };
+  // A failure the collector inferred has no errno (gVisor reports none for a
+  // missing or non-executable program); one gVisor reported has.
+  if (!row.exec_ok && (row.failed_errno != null || row.exec_failed)) {
+    return { status: 'failed', error: `exec failed: ${row.failed_errno != null ? `errno ${row.failed_errno}` : 'no program started (errno not reported)'}` };
+  }
   if (row.exited_at_ns != null) {
     if (row.exit_signal) return { status: 'failed', error: `killed by signal ${row.exit_signal}` };
     if (row.exit_code === 0) return { status: 'completed', error: null };
@@ -74,7 +78,8 @@ const PROCESS_FACTS = `
     WHERE ev.process_id = p.id AND ev.event_kind IN ('exec_succeeded','exec_failed') ORDER BY ev.stream_sequence LIMIT 1) AS argv_json,
   (SELECT json_extract(ev.payload_json, '$.errno') FROM runtime_events ev
     WHERE ev.process_id = p.id AND ev.event_kind = 'exec_failed' ORDER BY ev.stream_sequence DESC LIMIT 1) AS failed_errno,
-  EXISTS (SELECT 1 FROM runtime_events ev WHERE ev.process_id = p.id AND ev.event_kind = 'exec_succeeded') AS exec_ok`;
+  EXISTS (SELECT 1 FROM runtime_events ev WHERE ev.process_id = p.id AND ev.event_kind = 'exec_succeeded') AS exec_ok,
+  EXISTS (SELECT 1 FROM runtime_events ev WHERE ev.process_id = p.id AND ev.event_kind = 'exec_failed') AS exec_failed`;
 
 export function openEvidenceStore(file, { readOnly = false } = {}) {
   let journal = 'wal';

@@ -242,6 +242,17 @@ test('a failed execve reads as exec failed on its process', () => withStore((sto
   assert.deepEqual([child.status, child.error], ['failed', 'exec failed: errno 13']);
 }));
 
+test('a failed execve the collector inferred (no errno) still reads as exec failed', () => withStore((store) => {
+  const raw = { event_id: 1, kind: 'exec_failed', pid: 61, ppid: 1, argv: ['./missing'], errno: null, inferred: 'no program started after this exec attempt',
+    container_id: CONTAINER, process_start_ns: '10', timestamp_ns: '20' };
+  store.recordProcessStart({ containerId: CONTAINER, raw, startedMs: 1 });
+  captureDemo(store);
+  const [candidate] = store.candidatesInWindow(0, Number.MAX_SAFE_INTEGER, { sessionId: SESSION });
+  store.attribute({ toolCallId: candidate.call_id, eventId: `gvisor:${CONTAINER}:1`, method: 'inherited' });
+  const [child] = store.descendants(['e1']);
+  assert.deepEqual([child.status, child.error], ['failed', 'exec failed: no program started (errno not reported)']);
+}));
+
 test('auxiliary features round trip', () => withStore((store) => {
   store.saveExperiment({ id: 'x1', created_at: new Date().toISOString(), status: 'completed', exchange_id: 'e1', model: 'm' });
   assert.equal(store.loadExperiments()[0].id, 'x1');
