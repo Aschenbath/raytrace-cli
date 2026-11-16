@@ -764,3 +764,11 @@ select.rt-level{appearance:none;font-family:inherit;padding:2px 8px;cursor:point
 .nav-status .rt-network-status{padding-inline:8px}
 .rt-motion-theme.rt-wave-motion-toggle{color:var(--muted)}
 .rt-wave-motion-toggle[aria-pressed=true]{color:light-dark(#237c58,#78d9b2);border-color:light-dark(#aed8c6,#35644f)}
+
+/* Website box identity; follows the dashboard's selected color scheme. */
+.rt-brand-cube{width:32px;height:34px;flex-shrink:0;overflow:visible;stroke:light-dark(#647b40,#94b568);stroke-width:.7;stroke-linejoin:round}
+.rt-brand-cube-top{fill:light-dark(#edf5dd,#283222)}
+.rt-brand-cube-left{fill:light-dark(#d8e9b7,#131b10)}
+.rt-brand-cube-right{fill:light-dark(#b7cf92,#080e07)}
+.rt-brand-cube-marks{fill:none;stroke:light-dark(#49652a,#e2ffa8);stroke-width:1.6;stroke-linecap:round}
+[data-theme=dark] .rt-brand-cube-marks{filter:drop-shadow(0 0 .7px #e4ffb3) drop-shadow(0 0 2.4px #b9ff5dbb)}

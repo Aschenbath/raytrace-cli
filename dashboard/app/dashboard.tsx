@@ -17,8 +17,9 @@
 // Which section and prompt are open lives in the URL, so every cross-link is a
 // real link and Back works.
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Boxes, Brain, FileDiff, GitFork, Layers, MessagesSquare, Milestone, ScanSearch, Search as SearchIcon, ShieldCheck, Waypoints, Wrench } from 'lucide-react';
+import { Boxes, Brain, FileDiff, GitFork, Layers, MessagesSquare, Milestone, ScanSearch, Search as SearchIcon, ShieldCheck, Wrench } from 'lucide-react';
 import { type Trace } from './types';
+import { BrandLogo } from './brand-logo';
 import { ChainOfThoughtView } from './chain-of-thought-view';
 import { ContextView } from './context-view';
 import { loadAlerts } from './file-scan';
@@ -148,7 +149,7 @@ export function Dashboard({ views = VIEWS, offline = 'PROXY OFFLINE', footer = n
 
   return <main className="rt-shell" ref={shell}>
     <aside className="nav rt-nav">
-      <div className="brand"><Waypoints size={22} /> RayTrace</div>
+      <div className="brand"><BrandLogo /> RayTrace</div>
       {shows('search') && <form className="rt-nav-search" onSubmit={(event) => { event.preventDefault(); go({ view: 'search', q: navSearch }); }}>
         <SearchIcon size={13} />
         <input value={navSearch} onChange={(event) => setNavSearch(event.target.value)}
