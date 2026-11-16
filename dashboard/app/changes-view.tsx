@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Changes: what one prompt left different in the project, and the way back
 // to a local checkout. Whole-prompt first (every file, its overall diff,
@@ -47,6 +48,7 @@ export function ChangesView({ trace, onOpenCall }: { trace: Trace; onOpenCall?: 
       </div>
     </header>
 
+    {busy && <LoadingState label="Building the patch…" compact />}
     {!sandbox ? <p className="rt-empty">This prompt did not run in a sandbox, so RayTrace holds no snapshot of the project folder to diff.</p>
       : !summary.hasSnapshots ? <p className="rt-empty">This run was recorded before file snapshots existed, so there is nothing to diff. Tool calls still shows what the agent reported.</p>
         : !summary.files.length ? <p className="rt-empty">No file changed during this prompt. The snapshots taken after its steps show the project exactly as it started.</p>

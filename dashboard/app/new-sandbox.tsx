@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // New sandbox from a project folder: drop it (or pick it), see exactly what
 // would be uploaded and what stays on this machine, then create. Shown where
@@ -98,6 +99,6 @@ export function NewSandbox({ onCreated }: { onCreated: (id: string) => void }) {
       </div>
     </div>}
 
-    {stage.at === 'working' && <p className="rt-upload-working">{stage.step}</p>}
+    {stage.at === 'working' && <LoadingState label={stage.step} />}
   </div>;
 }

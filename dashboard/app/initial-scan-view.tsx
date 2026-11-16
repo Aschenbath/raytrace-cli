@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Initial scan: every file of a sandbox's project with how dangerous it is to
 // change, from 1 to 5, and why (worker/gvisor/file_scan.py scans the upload).
@@ -86,7 +87,7 @@ function Chooser({ onSelect }: { onSelect: (id: string) => void }) {
     return () => { closed = true; };
   }, []);
   if (error) return <p className="rt-empty">{error}</p>;
-  if (!boxes) return <p className="rt-empty">Loading…</p>;
+  if (!boxes) return <LoadingState label="Loading the initial scan…" />;
   if (!boxes.length) return <p className="rt-empty">No sandboxes yet. A project is scanned when its sandbox is created.</p>;
   return <>
     <div className="rt-list-head"><span>CHOOSE A SANDBOX</span></div>
@@ -213,7 +214,7 @@ export function InitialScanView({ box, traces, onSelect, onOpenCall, onAlertsSee
     </header>
     {!box && <Chooser onSelect={onSelect} />}
     {box && error && <p role="alert" className="verify-error">{error}</p>}
-    {box && !error && !scan && <p className="rt-empty">Loading…</p>}
+    {box && !error && !scan && <LoadingState label="Loading the initial scan…" />}
     {scan && <>
       <dl className="rt-stats">
         <div><dt>Files</dt><dd>{files.length.toLocaleString()}</dd></div>

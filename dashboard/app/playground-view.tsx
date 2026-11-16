@@ -1,4 +1,6 @@
 'use client';
+import { LoadingState } from './loading-state';
+import { DeleteButton } from './motion/controls';
 
 // Playground: rerun a Claude Code session from one step, with what the model
 // had seen or the project's files changed, and compare where it ends up.
@@ -12,7 +14,7 @@
 // step (proxy/playground.mjs), so only runs recorded in the sandbox with
 // snapshots can be forked; the preview says when a step cannot be.
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Check, GitFork, Pin, PinOff, Play, Trash2, X } from 'lucide-react';
+import { ArrowRight, Check, GitFork, Pin, PinOff, Play, X } from 'lucide-react';
 import { type Fork, type ForkPreview, type Trace } from './types';
 import { ResizeHandle } from './resize-handle';
 import { runPlace } from './trace-utils';
@@ -98,7 +100,7 @@ function FileDiff({ fork, path }: { fork: Fork; path: string }) {
       setDiff(response.ok ? value.diff || '(no difference)' : `Could not load the diff: ${value.error}`);
     }).catch(() => setDiff('Could not load the diff.'));
   }, [fork, path]);
-  if (diff === null) return <p className="pg-note">Loading diff…</p>;
+  if (diff === null) return <LoadingState label="Loading diff…" compact />;
   // An error message is not a diff; a real one reads side by side like elsewhere.
   return diff.startsWith('Could not load') ? <p className="pg-note">{diff}</p> : <DiffText diff={diff} />;
 }
@@ -142,8 +144,8 @@ function ForkRun({ fork, trace, fromIndex, forkTrace, onChanged, onOpenTrace }: 
         {!fork.deleted_at && !running(fork) && <button type="button" className="rt-button" disabled={busy} onClick={() => act(fork.keep ? 'unkeep' : 'keep')}
           title={fork.keep ? 'Let it be deleted like any other fork' : 'Keep this fork\'s sandbox instead of deleting it with the next run'}>
           {fork.keep ? <><PinOff size={13} /> Unkeep</> : <><Pin size={13} /> Keep</>}</button>}
-        {!fork.deleted_at && <button type="button" className="rt-button" disabled={busy} onClick={() => act('delete')}><Trash2 size={13} />
-          {fork.status === 'queued' ? 'Cancel this run' : running(fork) ? 'Stop and delete' : 'Delete sandbox'}</button>}
+        {!fork.deleted_at && <DeleteButton disabled={busy} onClick={() => act('delete')}>
+          {fork.status === 'queued' ? 'Cancel this run' : running(fork) ? 'Stop and delete' : 'Delete sandbox'}</DeleteButton>}
         {fork.deleted_at && fork.status !== 'cancelled' && <span className="pg-note">Sandbox deleted · results kept</span>}
       </div>
     </header>
@@ -161,7 +163,7 @@ function ForkRun({ fork, trace, fromIndex, forkTrace, onChanged, onOpenTrace }: 
       <section>
         <h3>Fork</h3>
         <ol className="pg-steps">{fork.events.filter((event) => event.kind === 'tool').map((event, index) => <li key={index}><b>{event.name}</b><code>{oneLine(event.detail, 140)}</code></li>)}
-          {running(fork) && <li className="pg-note pg-live">{fork.status === 'queued' ? `Waiting for run ${(fork.attempt ?? 2) - 1} to finish…` : fork.status === 'creating' ? 'Restoring the project and starting Claude Code…' : fork.status === 'collecting' ? 'Comparing files with the original…' : fork.status === 'checking' ? `Running ${fork.check?.command ?? 'the check'}…` : 'Working…'}</li>}
+          {running(fork) && <li className="pg-note"><LoadingState compact label={fork.status === 'queued' ? `Waiting for run ${(fork.attempt ?? 2) - 1} to finish…` : fork.status === 'creating' ? 'Restoring the project and starting Claude Code…' : fork.status === 'collecting' ? 'Comparing files with the original…' : fork.status === 'checking' ? `Running ${fork.check?.command ?? 'the check'}…` : 'Working…'} /></li>}
           {!running(fork) && !fork.events.some((event) => event.kind === 'tool') && <li className="pg-note">Answered without another tool call.</li>}</ol>
         {fork.result?.text && <><h4>Answer</h4><p className="pg-answer">{fork.result.text}</p></>}
         {fork.result && <p className="pg-note">{[fork.result.turns != null && `${fork.result.turns} turns`, fork.result.duration_ms != null && `${Math.round(fork.result.duration_ms / 1000)} s`,
@@ -267,7 +269,7 @@ function BatchSummary({ runs, shown, onShow, onChanged }: { runs: Fork[]; shown:
         {differ != null && <div><dt>Files differ</dt><dd>{Math.round(differ)}</dd></div>}
         {finished.length > 0 && <div><dt>Same files</dt><dd>{same}/{finished.length}</dd></div>}
       </dl>
-      {live && <button type="button" className="rt-button" disabled={busy} onClick={stopAll}><Trash2 size={13} /> Stop all runs</button>}
+      {live && <DeleteButton disabled={busy} onClick={stopAll}>Stop all runs</DeleteButton>}
     </header>
     {finished.length > 1 && <p className="pg-note">Typical run (median){cost != null ? '; cost at API prices' : ''}.
       {rate != null && rate > 0 && rate < 1 ? ' Passing some of the time means the outcome depends on luck, not just on what you changed.' : ''}</p>}
@@ -413,7 +415,7 @@ export function PlaygroundView({ trace, stepId, removeCall, forkTraces, onStep, 
       <div className="pg-main">
         {!place.forkable && <div className="pg-unforkable" role="note"><strong>{place.where === 'mac' ? 'This run can’t be forked' : place.where === 'fork' ? 'This is a fork' : 'Not forkable yet'}</strong><p>{place.reason}</p></div>}
         {place.forkable && !step && <p className="rt-empty">Pick the step to rerun from. Everything before it stays as it was; from it on, the model decides again.</p>}
-        {step && !preview && <p className="rt-empty">Checking whether this step can be forked…</p>}
+        {step && !preview && <LoadingState label="Checking whether this step can be forked…" />}
         {step && preview && !preview.forkable && <p className="pg-error">{preview.reason}</p>}
 
         {step && preview?.forkable && <section className="pg-change">
@@ -465,6 +467,7 @@ export function PlaygroundView({ trace, stepId, removeCall, forkTraces, onStep, 
               : `Also run it unchanged ×${repeat} to compare with, taking turns with your change`}</label>}
           {repeat > 1 && <p className="pg-note">Runs one after another, each from the same point{checkCommand ? ', each graded by the check' : ''}. {checkCommand ? '' : 'Without a check there is no pass rate, only how the runs compare. '}{changes.length && withBaseline ? '' : 'Tip: running it unchanged the same number of times shows how much it varies on its own.'}</p>}
           {message.trim() && excluded.length > 0 && <p className="pg-note">This run both steers it and removes files: if it ends differently, you won’t know which of the two did it.</p>}
+          {starting && <LoadingState label="Starting the fork…" compact />}
           {error && <p role="alert" className="pg-error">{error}</p>}
 
           <details className="pg-advanced" open={Boolean(removeCall) || undefined}>

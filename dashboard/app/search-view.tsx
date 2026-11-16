@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Search: Splunk-style over everything the agents did, failures first.
 // The bar takes free text plus field filters (outcome:failed tool:Bash
@@ -180,6 +181,7 @@ export function SearchView({ initialQuery = '', onQuery, onOpenCall, onOpenTrace
         {when(new Date(custom.from).toISOString())} – {when(new Date(custom.to).toISOString())} <X size={12} /></button>}
     </div>
 
+    {loading && <LoadingState label="Searching recorded activity…" compact />}
     {error && <p className="rt-search-error">{error}</p>}
     {(result?.errors ?? []).map((item) => <p key={item} className="rt-search-error">{item}</p>)}
     {result?.error && <p className="rt-search-error">{result.error}</p>}

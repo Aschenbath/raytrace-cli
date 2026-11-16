@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Sandbox evidence: what actually ran for one prompt, as the kernel layer saw
 // it. One table in time order. Processes no tool call accounts for sit inline
@@ -139,7 +140,7 @@ export function SandboxView({ trace, focusCall, onOpenCall }: {
             onClick={() => setSeverityFilter((prev) => (prev === level ? null : level))}>{bySeverity[level]} {name}</button>)}</dd></div>
       </dl>
       {error && <p role="alert" className="verify-error">{error}</p>}
-      {!data && !error && <p className="rt-empty">Loading…</p>}
+      {!data && !error && <LoadingState label="Loading sandbox evidence…" />}
       {data && !raw && <>
         {severityFilter != null && <p className="rt-foot rt-filter-note">Showing {shown.length} of {ordered.length} commands with {['none', 'low', 'high', 'severe'][severityFilter]} severity.{' '}
           <button type="button" className="link-button" onClick={() => setSeverityFilter(null)}>Show all</button></p>}

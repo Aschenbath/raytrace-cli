@@ -1,4 +1,5 @@
 'use client';
+import { LoadingState } from './loading-state';
 
 // Recap: what one prompt's run did and the observer's reading of why, written
 // once by a stronger model from the run's step lines (proxy/run-recap.mjs) the
@@ -58,7 +59,7 @@ export function RunRecap({ trace, onStep }: {
   return <section className="rt-recap" aria-label="Recap">
     <header><span className="eyebrow">RECAP</span>
       {state.status === 'ready' && <small>Written by {state.recap.model.split('/').pop()} from {state.recap.steps_read === state.recap.total_steps ? `all ${state.recap.total_steps}` : `${state.recap.steps_read} of ${state.recap.total_steps}`} steps</small>}</header>
-    {state.status === 'loading' && <p className="rt-muted">Reading the run…</p>}
+    {state.status === 'loading' && <LoadingState label="Reading the run…" compact />}
     {state.status === 'error' && <p className="rt-muted">{state.message} <button type="button" className="link-button" onClick={retry}><RotateCw size={11} /> Try again</button></p>}
     {state.status === 'ready' && <>
       {state.recap.headline && <p className="rt-recap-headline">{state.recap.headline}</p>}
