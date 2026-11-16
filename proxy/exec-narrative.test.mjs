@@ -260,3 +260,26 @@ test('a folded command keeps its process start time, so it can be matched to a c
   assert.equal(commands[0].event_id, 2, 'the tree keeps a different exec event than the first one...');
   assert.equal(commands[0].process_start_ns, '9000', '...but the same process identity');
 });
+
+test('a program that never started is its own failed line under the command that tried it', () => {
+  const failed = (id, pid, ppid, argv) => ({ event_id: id, kind: 'exec_failed', pid, ppid, argv, errno: null, timestamp_ns: String(id * 1000), process_start_ns: '5' });
+  const { commands } = fold([
+    exec(1, 300, 1, ['/bin/bash', '-c', './build.sh && ./missing-tool --flag']),
+    exec(2, 301, 300, ['./build.sh']),
+    exit(3, 301, 0),
+    failed(4, 302, 300, ['./missing-tool', '--flag']),   // the forked child that only tried it
+    exit(5, 302, 127),
+    exit(6, 300, 127),
+  ]);
+  assert.deepEqual(commands.map((entry) => [entry.command, entry.exec_failed === true, entry.exit_code]),
+    [['./build.sh && ./missing-tool --flag', false, 127], ['./build.sh', false, 0], ['./missing-tool --flag', true, 127]]);
+  assert.equal(commands[2].parent_event_id, 1);
+
+  // A process that tries one program, fails, and starts another keeps both lines.
+  const again = fold([failed(1, 400, 1, ['/opt/a']), exec(2, 400, 1, ['/usr/bin/b']), exit(3, 400, 0)]).commands;
+  assert.deepEqual(again.map((entry) => [entry.command, entry.exec_failed === true, entry.exit_code]), [['/opt/a', true, null], ['/usr/bin/b', false, 0]]);
+
+  // The shell handed exactly the program that is missing: the failure is not folded into the shell.
+  const same = fold([exec(1, 500, 1, ['/bin/sh', '-c', './gone']), failed(2, 501, 500, ['./gone']), exit(3, 501, 127), exit(4, 500, 127)]).commands;
+  assert.equal(same.filter((entry) => entry.exec_failed).length, 1);
+});

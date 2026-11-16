@@ -150,6 +150,24 @@ export function fold(events) {
       }
       continue;
     }
+    if (event.kind === 'exec_failed') {
+      // A program that never started (missing, or not executable). Shown as
+      // its own line, under the command whose process tried it: a shell that
+      // could not find what it was asked to run is otherwise just "exit 127".
+      const tried = Array.isArray(event.argv) ? event.argv : [];
+      if (!tried.length || underHarness(pid)) { folded.machinery += underHarness(pid) ? 1 : 0; continue; }
+      const owner = byPid.get(pid);
+      const entry = {
+        event_id: Number(event.event_id), pid, ppid: eventPpid, argv: tried, command: bareCommand(tried), marker_call_id: null,
+        started_ns: event.timestamp_ns ?? null, process_start_ns: typeof event.process_start_ns === 'string' ? event.process_start_ns : null,
+        ended_ns: event.timestamp_ns ?? null, exit_code: null, signal: null, parent_event_id: owner ? owner.event_id : null,
+        exec_failed: true, errno: typeof event.errno === 'number' ? event.errno : null,
+      };
+      // The forked child that only tried this: its exit closes this line.
+      if (!owner) byPid.set(pid, entry);
+      commands.push(entry);
+      continue;
+    }
     if (event.kind !== 'exec_succeeded') continue;
 
     const argv = Array.isArray(event.argv) ? event.argv : [];
@@ -158,7 +176,7 @@ export function fold(events) {
     if (isMachinery(argv)) { folded.machinery += 1; continue; }
 
     // A pid that already has a command is re-execing: same job, new image.
-    if (byPid.has(pid)) { folded.reexec += 1; continue; }
+    if (byPid.has(pid) && !byPid.get(pid).exec_failed) { folded.reexec += 1; continue; }
 
     const entry = {
       event_id: Number(event.event_id),
@@ -191,6 +209,7 @@ export function fold(events) {
   // children to the nearest ancestor that survived. A process whose parent ran
   // outside this window is genuinely unattributed and stays at the top level.
   for (const entry of commands) {
+    if (entry.parent_event_id != null) continue;   // a failed exec already under the command that tried it
     let ancestor = entry.ppid;
     const seen = new Set([entry.pid]);
     while (ancestor != null && !seen.has(ancestor)) {
@@ -210,7 +229,7 @@ export function fold(events) {
   const byEventId = new Map(commands.map((entry) => [entry.event_id, entry]));
   const collapsed = commands.filter((entry) => {
     const parent = entry.parent_event_id != null ? byEventId.get(entry.parent_event_id) : null;
-    if (!parent || !sameWork(entry.command, parent.command)) return true;
+    if (entry.exec_failed || !parent || !sameWork(entry.command, parent.command)) return true;
     parent.exit_code = entry.exit_code ?? parent.exit_code;
     parent.signal = entry.signal ?? parent.signal;
     parent.ended_ns = entry.ended_ns ?? parent.ended_ns;

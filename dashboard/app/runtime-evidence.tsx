@@ -31,6 +31,8 @@ export type Command = {
   argv: string[]; command: string;
   started_ns: string | null; ended_ns: string | null;
   exit_code: number | null; signal: number | null;
+  /** The program never started: missing or not executable. `errno` only when the sandbox reported one. */
+  exec_failed?: boolean; errno?: number | null;
   parent_event_id: number | null;
   description: string | null;
   description_source: 'rule' | 'model' | 'raw';
@@ -185,6 +187,7 @@ function Row({ command, ordinal, links }: { command: Command; ordinal?: number; 
       {command.description_source === 'model' && <span className="evidence-ai" title="Described by a model, not derived from the command text. Treat as a reading, not an observation.">~AI</span>}
       {command.description_source === 'raw' && <span className="evidence-nodesc" title="No rule matched and no description was generated; this is the command exactly as it ran.">verbatim</span>}
     </span>
+    {command.exec_failed && <span className="evidence-exit failed" title="The sandbox saw the attempt to start this program, and no program started: it is missing or not executable.">did not start{command.errno != null ? ` (errno ${command.errno})` : ''}</span>}
     {command.exit_code != null && <span className={failed ? 'evidence-exit failed' : 'evidence-exit'}>exit {command.exit_code}</span>}
     {command.signal ? <span className="evidence-exit failed">signal {command.signal}</span> : null}
     <SeverityBadge severity={command.severity} />
@@ -201,7 +204,7 @@ function Row({ command, ordinal, links }: { command: Command; ordinal?: number; 
 type StepView = { tree: Map<number, Command[]>; highlight: string | null; openPath: Set<number>; links?: CallLinks };
 
 function Step({ command, depth, ordinal, view }: { command: Command; depth: number; ordinal?: number; view: StepView }) {
-  const failed = command.exit_code != null && command.exit_code !== 0;
+  const failed = command.exec_failed || (command.exit_code != null && command.exit_code !== 0);
   const kids = inOrder(view.tree.get(command.event_id) ?? []);
   const key = processKey(command.pid, command.process_start_ns);
   const highlighted = key != null && key === view.highlight;
