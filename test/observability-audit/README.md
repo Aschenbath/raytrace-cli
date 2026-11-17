@@ -24,8 +24,8 @@ python3 test/observability-audit/collect.py audit-box "$OUT"
 python3 test/observability-audit/matrix.py "$OUT"
 ```
 
-Phases `w` and `x` call `projects.py set-guardrails` in the VM directly: the
-local CLI and dashboard have no way to set those lists (finding 1).
+Phases `w` and `x` call `projects.py set-guardrails` in the VM directly; the
+same lists are now set with `raytrace sandbox files <name> --report <path>`.
 
 Shutdown: start `workload.py s_heartbeat /workspace/audit/w` with `docker exec -d`,
 run `raytrace sandbox stop <name>`, read `heartbeat.txt` from the volume in the
@@ -64,8 +64,8 @@ VM, and compare its SHA-256 with the last `changed` fact's `basis.after.sha256`.
    also get read facts. Still not recorded: reads of ordinary files (counted
    per step only), projects over 20,000 files (falls back to listed and
    sensitive files), and a file moved into a folder that holds no other
-   project file. There is still no local command to set the Report and
-   Restrict lists. Rerun: phase `a` gave a fact for every file test, each
+   project file. The Report and Restrict lists are set with
+   `raytrace sandbox files <name>` (the dashboard still cannot). Rerun: phase `a` gave a fact for every file test, each
    credited to its own step.
 2. **Calls gVisor reports by number arrive with no process or sandbox, so the
    engine discards them.** Message type 6 carries no `context_data` in this

@@ -260,6 +260,51 @@ export async function start(id) {
   say(`${registry()[id].name} running`);
 }
 
+/** A path as the lists keep it: from the project's root, with no ./ or trailing slash. */
+const listPath = (path) => String(path).trim().replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+
+/**
+ * The two lists after a change. A file is on one list at most: restricting a
+ * reported file moves it, and the other way round. `clear` takes it off both.
+ */
+export function changedLists(current, { restrict = [], report = [], clear = [] } = {}) {
+  const [toRestrict, toReport, toClear] = [restrict, report, clear].map((paths) => paths.map(listPath).filter(Boolean));
+  const both = toRestrict.filter((path) => toReport.includes(path));
+  if (both.length) throw new Error(`${both[0]} is given to both --restrict and --report; pick one.`);
+  const gone = new Set([...toClear, ...toRestrict, ...toReport]);
+  const keep = (list) => (list ?? []).filter((path) => !gone.has(path));
+  const unique = (list) => [...new Set(list)].sort();
+  return { restricted: unique([...keep(current.restricted), ...toRestrict]), watched: unique([...keep(current.watched), ...toReport]) };
+}
+
+/**
+ * Shows or changes a local sandbox's two file lists.
+ * Restrict: the agent's file tools are refused at once, and the file is locked
+ * read-only for every program from the sandbox's next start.
+ * Report: every read and change of the file is recorded as its own line.
+ */
+export async function files(ref, change = {}) {
+  const id = pickId(ref);
+  ensureVm();
+  const { name } = registry()[id];
+  const read = (args, options) => JSON.parse(projects(args, options).stdout);
+  let lists = read(['guardrails', id]);
+  const changing = ['restrict', 'report', 'clear'].some((key) => change[key]?.length);
+  if (changing) {
+    const wanted = changedLists(lists, change);
+    lists = read(['set-guardrails', id], { input: JSON.stringify(wanted) });
+  }
+  const show = (title, list, none) => say(`${title}\n${list.length ? list.map((path) => `  ${path}${lists.missing.includes(path) ? '   (no such file in the sandbox yet)' : ''}`).join('\n') : `  ${none}`}`);
+  say(`${name}${changing ? ': lists updated' : ''}\n`);
+  show('Restrict (the agent cannot change these):', lists.restricted, 'none');
+  show('\nReport (every read and change is recorded):', lists.watched, 'none');
+  const unlocked = lists.restricted.filter((path) => !lists.read_only.includes(path) && !lists.missing.includes(path));
+  if (unlocked.length) {
+    say(`\nNot locked yet: ${unlocked.join(', ')}\nThe agent's file tools are refused now. To lock ${unlocked.length === 1 ? 'it' : 'them'} against every program: raytrace sandbox stop ${name} && raytrace sandbox start ${name}`);
+  }
+  if (!changing) say(`\nChange them: raytrace sandbox files ${name} --restrict <path> | --report <path> | --clear <path>`);
+}
+
 export async function stop(id) {
   id = pickId(id);
   if (vmStatus() === 'Running') projects(['stop', id]);

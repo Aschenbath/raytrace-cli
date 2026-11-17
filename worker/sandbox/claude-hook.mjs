@@ -138,7 +138,8 @@ if (input.hook_event_name === 'PreToolUse') {
       queue({ kind: 'blocked', path });
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
         permissionDecisionReason: `RayTrace: ${path} is restricted by this project's owner and cannot be changed. `
-          + 'Do not try another way to write it; tell the user it has to be unlocked under Initial scan in the RayTrace dashboard.' } }));
+          + 'Do not try another way to write it; tell the user it has to be unlocked: under Initial scan in the RayTrace dashboard, '
+          + `or for a local sandbox with \`raytrace sandbox files <name> --clear ${path}\`.` } }));
     }
     process.exit(0);
   }
