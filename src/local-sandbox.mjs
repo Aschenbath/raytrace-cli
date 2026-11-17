@@ -245,10 +245,17 @@ export async function list() {
   if (!running) say(`\nThe RayTrace VM is stopped; \`raytrace sandbox start <name>\` starts it.`);
 }
 
+/** Starts a sandbox and gives it this version's hook: the VM keeps the copy
+ * the sandbox was created with, which a newer RayTrace has since changed. */
+function startWithHook(id) {
+  projects(['start', id]);
+  projects(['enable-claude', id], { input: readFileSync(HOOK) });
+}
+
 export async function start(id) {
   id = pickId(id);
   ensureVm();
-  projects(['start', id]);
+  startWithHook(id);
   await ensureBridge();
   say(`${registry()[id].name} running`);
 }
@@ -350,6 +357,7 @@ export const promptsLink = (id) => `http://127.0.0.1:${portOf(readConfig())}/?bo
 export async function shell(id, { agent } = {}) {
   id = pickId(id);
   ensureVm();
+  startWithHook(id);
   await ensureBridge();
   const { name } = registry()[id];
   say(agent ? `Connected to ${name}, starting ${AGENTS[agent].name} without approval prompts (the sandbox is what contains it); when it exits you are in the sandbox's shell. The sandbox keeps running.`

@@ -348,6 +348,45 @@ class EveryProjectFile(unittest.TestCase):
         self.engine.executed(self.box, {'pid': 50, 'ppid': 1, 'process_start_ns': '50', 'executable': '/bin/bash', 'argv': [
             '/bin/bash', '-c', "source /home/node/snap.sh || true && eval 'export RAYTRACE_CALL_ID=toolu_01ABC\necho hi > src/app.js' < /dev/null"]})
         self.assertEqual(self.box.processes[50]['call_id'], 'toolu_01ABC')
+    def hook(self, pid, phase, call_id, path, at_ns):
+        """The hook, started by the agent (pid 10), announcing a file tool's call."""
+        self.engine.executed(self.box, {'pid': pid, 'ppid': 10, 'process_start_ns': str(pid), 'executable': '/usr/local/bin/node',
+                                        'argv': ['node', engine.OWN_HOOK]})
+        self.engine.executed(self.box, {'pid': pid + 1, 'ppid': pid, 'process_start_ns': str(pid + 1), 'executable': '/usr/bin/true',
+                                        'argv': ['true', engine.TOOL_MARK, phase, 'Write', path], 'timestamp_ns': str(at_ns),
+                                        'markers': {'RAYTRACE_CALL_ID': call_id}})
+
+    def test_the_agents_own_file_tool_is_joined_to_the_call_the_hook_announced(self):
+        self.engine.refresh(self.box)
+        self.box.processes[10] = {'start_ns': '10', 'ppid': 1, 'name': 'claude.exe', 'argv': ['claude'], 'call_id': None}
+        read = {'kind': 'open', 'pathname': '/workspace/config/payment-keys.js', 'flags': 0, 'errno': 0, 'pid': 10, 'ppid': 1,
+                'process_start_ns': '10', 'sysno': 56}
+        now = time.time_ns()
+        # Before any call is announced, the agent's read names no call.
+        self.engine.opened(self.box, {**read, 'timestamp_ns': str(now - 60_000_000_000)})
+        self.hook(60, 'begin', 'toolu_read', 'config/payment-keys.js', now)
+        self.engine.opened(self.box, {**read, 'timestamp_ns': str(now + 1_000_000)})
+        self.hook(62, 'end', 'toolu_read', 'config/payment-keys.js', now + 2_000_000)
+        # Long after the call ended, it is not that call's read.
+        self.engine.opened(self.box, {**read, 'timestamp_ns': str(now + 30_000_000_000)})
+        self.assertEqual({(fact['call_id'], fact.get('call_from'), fact['count']) for fact in self.engine.facts.values()},
+                         {(None, None, 2), ('toolu_read', 'tool_report', 1)})
+        self.engine.facts.clear()
+        # A file the Write tool saves: written under another name and moved here.
+        self.hook(64, 'begin', 'toolu_write', 'src/app.js', time.time_ns())
+        self.write('src/app.js', 'saved by the tool')
+        self.engine.numbered_call(self.box, {**self.RENAME, 'pid': 10, 'process_start_ns': '10', 'timestamp_ns': str(time.time_ns())})
+        self.looked('src/app.js', 'moved_to')
+        (fact,) = self.engine.facts.values()
+        self.assertEqual((fact['effect'], fact['certainty'], fact['pid'], fact['call_id']), ('changed', 'confirmed', 10, 'toolu_write'))
+
+    def test_only_the_hook_can_announce_a_call(self):
+        self.engine.refresh(self.box)
+        self.box.processes[10] = {'start_ns': '10', 'ppid': 1, 'name': 'claude.exe', 'argv': ['claude'], 'call_id': None}
+        self.engine.executed(self.box, {'pid': 70, 'ppid': 10, 'process_start_ns': '70', 'executable': '/usr/bin/true',
+                                        'argv': ['true', engine.TOOL_MARK, 'begin', 'Read', 'config/payment-keys.js'],
+                                        'timestamp_ns': str(time.time_ns()), 'markers': {'RAYTRACE_CALL_ID': 'made_up'}})
+        self.assertEqual(len(self.box.tools), 0)
 
     def test_a_write_through_a_link_is_still_the_writers(self):
         os.symlink('app.js', Path(self.folder.name) / 'src/alias.js')

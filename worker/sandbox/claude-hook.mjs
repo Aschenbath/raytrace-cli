@@ -10,6 +10,9 @@
  * (collector.py MARKER_KEYS): the evidence joins the call exactly instead of
  * by command text.
  *
+ * PreToolUse and PostToolUse (a file tool): tells the sandbox's recorder which
+ * call is at the file, before and after (announce() below).
+ *
  * PreToolUse (a file tool): refuses an edit to a file the project's owner
  * restricted (the list projects.py guardrails() writes beside this script),
  * saying why. From the sandbox's next start the file is locked on the host
@@ -109,11 +112,29 @@ function queue(event) {
   } catch { /* never disturb Claude Code */ }
 }
 
+/**
+ * Tells the sandbox's recorder which tool call is at a file. A file tool runs
+ * inside Claude Code itself, which carries no call id, so the recorder sees
+ * the agent open or replace the file and cannot say for which call. A program
+ * started here carries the id in its environment and the file in its
+ * arguments, and the recorder reads both (engine.py TOOL_MARK). It does nothing.
+ */
+function announce(phase, path) {
+  if (!path || !/^[A-Za-z0-9_-]{1,128}$/.test(input.tool_use_id ?? '') || typeof input.tool_name !== 'string') return;
+  try {
+    execFileSync('/bin/true', ['raytrace-tool', phase, input.tool_name, path],
+      { env: { ...process.env, RAYTRACE_CALL_ID: input.tool_use_id }, stdio: 'ignore', timeout: 2000 });
+  } catch { /* never disturb Claude Code */ }
+}
+
 if (input.hook_event_name === 'PreToolUse') {
   const named = input.tool_input?.file_path ?? input.tool_input?.notebook_path;
   if (input.tool_name !== 'Bash' && typeof named === 'string') {
     const path = inside(named);
-    if (path && restricted.includes(path)) {
+    // A read is never refused here: the file lock on the host decides that.
+    const refused = path && input.tool_name !== 'Read' && restricted.includes(path);
+    if (path && !refused) announce('begin', path);
+    if (refused) {
       queue({ kind: 'blocked', path });
       process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny',
         permissionDecisionReason: `RayTrace: ${path} is restricted by this project's owner and cannot be changed. `
@@ -306,6 +327,10 @@ if (!/^[0-9a-f-]{36}$/.test(session ?? '') || typeof transcript !== 'string'
   || !transcript.startsWith(join(home, '.claude', 'projects') + '/')) process.exit(0);
 
 const callId = /^[A-Za-z0-9_-]{1,128}$/.test(input.tool_use_id ?? '') ? input.tool_use_id : null;
+// The file tool is done: what the agent does to the file after this is not this call's.
+if (input.hook_event_name === 'PostToolUse' && input.tool_name !== 'Bash') {
+  announce('end', inside(input.tool_input?.file_path ?? input.tool_input?.notebook_path));
+}
 // A read of a file the owner restricted or watches. A write that went through
 // is in the snapshot below, with its size; a refused one was queued above.
 if (input.hook_event_name === 'PostToolUse' && READ_ONLY.has(input.tool_name)) {
