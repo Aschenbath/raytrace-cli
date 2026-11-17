@@ -159,3 +159,29 @@ E. A process `docker exec` starts directly has no exec event (finding 7), so
   file and network facts are right (the engine follows the fork); only the
   process list lacks them. A row with no exec event would need the process
   views reworked, which is more than a small fix.
+
+## DNS lookups (2026-11-17)
+
+Finding 9 said DNS lookups name no process. The resolver (`dns_forwarder.py`)
+sees an address only; the engine sees each process connect to it. They are now
+joined by time, and a process is named only when it is the only one that
+connected to the resolver within 50 ms before the query arrived (`likely`).
+With several, nobody is named and the candidates are listed.
+
+`dns-probe.sh <sandbox id>` runs 33 lookups of reserved `.invalid` names, each
+under its own call id: glibc `getaddrinfo`, `getent`, Node's `dns.lookup` and
+c-ares, a reused c-ares channel, two processes in parallel, and a one-off
+lookup beside a process resolving every 100 ms. It prints the ground truth;
+`dns-score.py` compares it with the `dns` facts read from the VM's
+`/var/lib/raytace/runtime.db`.
+
+| Rule | Right | Unnamed | Wrong |
+| --- | --- | --- | --- |
+| latest connection up to 5 s before, 1 s after the answer | 7 | 0 | 23 (+3 partly) |
+| closest connection, timed from the answer | 22 | 0 | 7 (+4 partly), all with other candidates |
+| closest, timed from the query's arrival, 250 ms window | 28 | 0 | 4 (+1 partly), all with other candidates |
+| closest, timed from the query's arrival, 50 ms window | 25 | 0 | 7 (+1 partly), all with other candidates |
+| only a lone candidate is named (shipped) | 11 | 21 | 0 |
+
+A query arrives 0-2 ms after its own connection. Two processes asking within
+the same millisecond cannot be told apart by time, so they stay unnamed.
