@@ -76,6 +76,11 @@ SCHEMA = '''
   CREATE INDEX IF NOT EXISTS facts_container ON facts(container_id, id);
   CREATE TABLE IF NOT EXISTS dns_cache (client TEXT NOT NULL, ip TEXT NOT NULL, name TEXT NOT NULL, seen_ns INTEGER NOT NULL,
     PRIMARY KEY (client, ip));
+  -- Each process's connection to the sandbox network's resolver: dns_forwarder.py
+  -- names the process behind a lookup from the one that connected just before it.
+  CREATE TABLE IF NOT EXISTS resolver_calls (container_id TEXT NOT NULL, at_ns INTEGER NOT NULL, pid INTEGER,
+    process_start_ns TEXT, process TEXT, command TEXT, call_id TEXT);
+  CREATE INDEX IF NOT EXISTS resolver_calls_at ON resolver_calls (container_id, at_ns);
 '''
 AT_FDCWD = -100
 O_ACCMODE, O_CREAT, O_TRUNC, O_APPEND = 3, 0o100, 0o1000, 0o2000
@@ -369,6 +374,7 @@ class Engine(threading.Thread):
         self.boxes = {}
         self.facts = {}          # fact id -> the fact, while it may still grow
         self.dirty = {}          # fact ids to write
+        self.resolver = []       # connections to the resolver, to write: see connected()
         self.inotify = None
         self.watched = {}        # inotify watch -> (sandbox, folder)
         if watch:
@@ -709,6 +715,11 @@ class Engine(threading.Thread):
         return fact
 
     def flush(self):
+        if self.resolver:
+            self.db.executemany('INSERT INTO resolver_calls (container_id, at_ns, pid, process_start_ns, process, command, call_id) '
+                                'VALUES (?,?,?,?,?,?,?)', self.resolver[-5000:])
+            self.db.commit()
+            self.resolver.clear()
         if self.dirty:
             now = int(time.time() * 1000)
             rows = []
@@ -731,6 +742,7 @@ class Engine(threading.Thread):
             self.db.execute('DELETE FROM facts WHERE container_id = ? AND id NOT IN (SELECT id FROM facts WHERE container_id = ? ORDER BY id DESC LIMIT ?)',
                             (container, container, RETAIN_ROWS))
         self.db.execute('DELETE FROM dns_cache WHERE seen_ns < ?', (time.time_ns() - 86_400_000_000_000,))
+        self.db.execute('DELETE FROM resolver_calls WHERE at_ns < ?', (time.time_ns() - 600_000_000_000,))
         self.db.commit()
 
     def counted(self, box, who, top, at_ns):
@@ -1119,8 +1131,16 @@ class Engine(threading.Thread):
                 self.bridge = (BRIDGE.read_text().strip().removeprefix('http://'), now)
             except OSError:
                 self.bridge = ('', now)
-        if f'{ip}:{port}' in (self.bridge[0], f'{network.GATEWAY}:53'):
-            return   # RayTrace's own: the model and transcript bridge, and the resolver (dns_forwarder.py records lookups)
+        if f'{ip}:{port}' == f'{network.GATEWAY}:53':
+            # The resolver: dns_forwarder.py records the lookup itself, and names
+            # its process from this, the connection the lookup was sent on.
+            if not errno and not listening:
+                who = self.who(box, event)
+                self.resolver.append((box.container, at_ns, who.get('pid'), who.get('start_ns'), who.get('name'),
+                                      ' '.join(who.get('argv') or [])[:160] or None, who.get('call_id')))
+            return
+        if f'{ip}:{port}' == self.bridge[0]:
+            return   # RayTrace's own: the model and transcript bridge
         who = self.who(box, event)
         if listening:
             outcome = 'failed' if errno else 'listening'
