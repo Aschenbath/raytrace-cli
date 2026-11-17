@@ -86,6 +86,12 @@ export function toExecutionEvent(event, clock = UNMEASURED_CLOCK) {
   const pid = Number(event.pid);
   const eventId = Number(event.event_id);
   if (!command || timestamp == null || !Number.isFinite(pid) || !Number.isFinite(eventId)) return null;
+  // The hook announcing a file tool's call to the sandbox's recorder
+  // (worker/sandbox/claude-hook.mjs announce()): /bin/true, carrying the call
+  // id. It is not a process the call ran, and recording it would tie every
+  // Read, Write and Edit to a `true` that exited 0. Only the real `true` is
+  // left out: any other program given these arguments is recorded as usual.
+  if (argv[1] === 'raytrace-tool' && /^(?:\/usr)?\/bin\/true$/.test(String(event.executable ?? ''))) return null;
   // `markers` is the collector's allowlisted RAYTRACE_* env (see
   // worker/gvisor/collector.py MARKER_KEYS). When RAYTRACE_CALL_ID is present
   // it IS the answer -- the call id travelled with the process -- and the

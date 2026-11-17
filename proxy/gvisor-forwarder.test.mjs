@@ -433,3 +433,11 @@ test('a source checkpoint failure does not reject the background poll and retrie
  const forwarder=startGvisorForwarder({ingest:async()=>new Map(),finish:()=>{},fetchImpl,log:()=>{},saveProgress:async()=>{if(fail)throw Error('disk full');saved++;},pollMs:60000,discoverMs:60000});
  try{await forwarder.discover();await assert.doesNotReject(forwarder.poll());fail=false;await forwarder.poll();assert.equal(saved,1);}finally{forwarder.stop();}
 });
+
+test('the hook announcing a file tool call is not a process of that call', () => {
+  const announce = { ...exec(7, 300, 299, ['true', 'raytrace-tool', 'begin', 'Read', 'src/app.js']), executable: '/usr/bin/true', markers: { RAYTRACE_CALL_ID: 'toolu_1' } };
+  assert.equal(toExecutionEvent(announce), null);
+  // Any other program given the same arguments is a process like any other.
+  assert.equal(toExecutionEvent({ ...announce, executable: '/workspace/true' }).call_marker, 'toolu_1');
+  assert.equal(toExecutionEvent({ ...announce, argv: ['true', 'something-else'] }).call_marker, 'toolu_1');
+});
