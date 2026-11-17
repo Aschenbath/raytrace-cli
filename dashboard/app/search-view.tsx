@@ -48,7 +48,7 @@ const QUICK = [
   'failed | stats count by tool',
   'failed | timechart count by model span=1d',
 ];
-const SERIES_COLORS = ['#8a8f98', '#b03a48', '#13549b', '#9e6514', '#29996b', '#5b4bc4', '#33373d', '#c06a2b', '#777d87'];
+const SERIES_COLORS = ['#8a9281', '#b03a48', '#13549b', '#9e6514', '#29996b', '#5b4bc4', '#34392f', '#c06a2b', '#78806e'];
 
 function renderSnippet(text: string) {
   const parts = text.split(/(\[[^\]]*\])/g);
@@ -197,7 +197,7 @@ export function SearchView({ initialQuery = '', onQuery, onOpenCall, onOpenTrace
 
       {histogram.length > 0 && <div className="rt-search-chart">
         <StackedBars rows={histogram} height={110}
-          series={[{ key: 'other', color: '#c3c7cd', label: 'ok / unknown' }, { key: 'failed', color: '#b03a48', label: 'failed' }]}
+          series={[{ key: 'other', color: '#c2caba', label: 'ok / unknown' }, { key: 'failed', color: '#b03a48', label: 'failed' }]}
           onBucket={(t) => { setCustom({ from: t, to: t + bucketMs - 1 }); setRange('custom'); setOffset(0); }} />
         <small>Grey ok/unknown, red failed. Click a bar to zoom to that window.</small>
       </div>}
