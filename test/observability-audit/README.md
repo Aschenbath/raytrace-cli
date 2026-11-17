@@ -107,3 +107,27 @@ VM, and compare its SHA-256 with the last `changed` fact's `basis.after.sha256`.
 Held up: process exec/exit with codes and signals, 300-process and 5,000-open
 bursts with zero drops, every collector row present on the host and in the
 dashboard API, shutdown (last recorded hash equals the file on disk), restart.
+
+## Agent run (2026-11-16, 0.15.0)
+
+A signed-in Claude Code session in the sandbox ran 14 steps as 9 tool calls
+(Write, Read, Edit and Bash). Tool calls, their arguments and results, the
+join of each Bash call to its process, and the per-call snapshots were all
+right. What it showed that the scripted run could not:
+
+A. **A Write or Edit tool's change was credited to RayTrace's own snapshot
+   hook** (`git add`, "one of" five git processes), and a new file the Write
+   tool made had no `created` fact. The tools write a temporary file and rename
+   it; the hook's git renames its index at the same moment. *Fixed:* the hook's
+   processes are not candidates, and a file moved in from a temporary name that
+   was never looked at is `created` by the mover.
+B. **A shell redirect (`echo x > file`) in a Bash call had no call id.** The
+   call id is exported inside the shell's command text, after a quote the
+   engine's pattern did not allow. *Fixed.*
+C. **Each tool call added about 13 `read` facts** for sensitive and watched
+   files, by the hook's `git add`. *Fixed:* counted, not listed.
+D. Open: a file that lives under a second inside one command leaves no fact
+   (finding 6); the Read, Write and Edit tools run inside the agent process, so
+   their facts name the agent but no tool call; `reported_check` is never set.
+E. A process `docker exec` starts directly has no exec event (finding 7), so
+   no call id from its environment: tests must go through `sh -c`.
