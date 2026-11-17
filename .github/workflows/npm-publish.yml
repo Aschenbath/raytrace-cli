@@ -48,7 +48,10 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 
-      - name: Bump version and push release tag
+      # The release is a tag only: the version commit sits on top of main and is
+      # never pushed to it, because main takes changes through pull requests
+      # alone. The next version counts from the highest vX.Y.Z tag.
+      - name: Make the version commit and push its release tag
         id: release
         run: node .github/scripts/prepare-npm-release.mjs
 
