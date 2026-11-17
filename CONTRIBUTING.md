@@ -125,10 +125,14 @@ Only one release label is allowed; conflicting or unknown release labels fail
 without creating a release. Add labels before merging. The workflow queues
 merged PRs instead of cancelling earlier queued releases (up to GitHub's
 100-run queue limit). Rerunning the same merged-PR workflow reuses its release
-commit and tag. Version commits and tags are pushed atomically, with a retry
-if main advances. The bot needs permission to push release commits to main;
-branch protections must permit this if added later. Releases use the latest
-main when their queued run starts, so they can include other already merged PRs.
+commit and tag. The version commit is pushed as a tag only, never to main, so
+`package.json` on main does not change; the next version counts from the
+highest `vX.Y.Z` tag. Releases use the latest main when their queued run
+starts, so they can include other already merged PRs.
+
+The merge run only makes the tag and the GitHub Release. It then starts a
+second, dispatched run of the same workflow to publish: npm's trusted
+publishing refuses a run started by a pull request event.
 
 `npm-publish.yml` checks the
 tag against `package.json`, runs typechecking and tests, builds the dashboard

@@ -67,10 +67,14 @@ jobs:
           # GITHUB_TOKEN pushes do not trigger tag workflows. Dispatch this
           # explicitly; the wheels are built for download, not uploaded to PyPI.
           gh workflow run pip.yml --ref "$RELEASE_TAG"
+          # npm's trusted publishing refuses a run started by a pull request
+          # event (404 on upload) and accepts a dispatched one, so the publish
+          # is a second run of this workflow rather than the next job of this one.
+          gh workflow run npm-publish.yml --ref main -f tag="$RELEASE_TAG"
 
   publish:
     needs: prepare-release
-    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && ((needs.prepare-release.result == 'success' && needs.prepare-release.outputs.tag != '') || github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease))
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -81,7 +85,7 @@ jobs:
       id-token: write
       deployments: write
     env:
-      RELEASE_TAG: ${{ needs.prepare-release.outputs.tag || github.event.release.tag_name || inputs.tag }}
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
       - uses: actions/checkout@v6
         with:
