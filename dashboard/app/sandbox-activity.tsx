@@ -14,7 +14,8 @@ type Step = { trace: string; call: string } | null;
 
 const EFFECT_WORDS: Record<FileFact['effect'], string> = {
   read: 'Read', created: 'Created', changed: 'Changed', emptied: 'Emptied', appended: 'Appended to', deleted: 'Deleted', renamed: 'Renamed',
-  permissions_changed: 'Permissions changed', attempted: 'Refused', opened_for_writing: 'Opened for writing, not changed',
+  permissions_changed: 'Permissions changed', attempted: 'Refused', opened_for_writing: 'Opened for writing, same content',
+  created_and_deleted: 'Created and deleted', rewritten: 'Written, same content',
 };
 const INTENT_WORDS: Record<string, string> = { read: 'a read', write: 'a write', delete: 'a delete', rename: 'a rename', permissions: 'a permission change' };
 const CERTAINTY_WORDS: Record<Certainty, [string, string]> = {

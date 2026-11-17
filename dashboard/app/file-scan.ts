@@ -104,7 +104,7 @@ export type FileFact = Fact & {
   path: string | null;
   /** `project`: an ordinary project file, on no list. */
   guard: 'restricted' | 'watched' | 'sensitive' | 'project' | null;
-  effect: 'read' | 'created' | 'changed' | 'emptied' | 'appended' | 'deleted' | 'renamed' | 'permissions_changed' | 'attempted' | 'opened_for_writing';
+  effect: 'read' | 'created' | 'changed' | 'emptied' | 'appended' | 'deleted' | 'renamed' | 'permissions_changed' | 'attempted' | 'opened_for_writing' | 'created_and_deleted' | 'rewritten';
   certainty: Certainty;
   /** What a refused call was trying to do. */
   intent?: 'read' | 'write' | 'delete' | 'rename' | 'permissions';

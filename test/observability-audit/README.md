@@ -138,3 +138,24 @@ F. A sandbox kept the hook it was created with: `start` put the VM's stored
    copy back. *Fixed:* `sandbox start` and `connect` install the current hook.
 E. A process `docker exec` starts directly has no exec event (finding 7), so
    no call id from its environment: tests must go through `sh -c`.
+
+## Small items closed (2026-11-17)
+
+- **Finding 6.** A file that came and went between two looks is now a line:
+  `created_and_deleted` (or `deleted`, when it was moved to that name first),
+  credited to whoever deleted it, or failing that whoever made it. A file
+  written with the same bytes it had is `rewritten`, at once, instead of
+  `opened_for_writing / possible` 30 s later. Both notes say what is not known.
+  Limit: in a project with more than 2,000 kept files, a file is not hashed
+  until it is first touched, so the first change-and-restore of it reads as `changed`.
+- **`reported_check` was never set for Claude Code.** Its Bash result carries
+  a code only on failure ("Exit code N", as an error). That is now read; a
+  result with no code and no error agrees with an observed exit 0, and is left
+  unchecked with any other exit (a command left running also reports no error).
+- **Finding 9, merged deletes.** File facts nobody can be named for are kept
+  per minute, so two deletes ten minutes apart are two lines.
+- **Left open, finding 7:** a process `docker exec` starts directly, and a
+  forked child that never execs, still have no process row on the host. Their
+  file and network facts are right (the engine follows the fork); only the
+  process list lacks them. A row with no exec event would need the process
+  views reworked, which is more than a small fix.

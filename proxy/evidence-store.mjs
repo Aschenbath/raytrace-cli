@@ -983,7 +983,14 @@ export function openEvidenceStore(file, { readOnly = false } = {}) {
     for (const row of rows) {
       if (!row.reported_result_sha || row.exited_at_ns == null || row.exit_code == null) continue;
       const reported = toolResultFacts(getPayload(row.reported_result_sha));
-      if (reported.exitCode === null) continue;
+      if (reported.exitCode === null) {
+        // No code reported and no error: the agent took it as having worked,
+        // which agrees with an observed exit 0. With any other exit it stays
+        // unchecked: a command left running in the background also reports
+        // no error, and a false "differs" costs more trust than it earns.
+        if (reported.impliedSuccess && row.exit_code === 0) q('UPDATE runtime_attributions SET reported_check = ? WHERE id = ?').run('agrees', row.id);
+        continue;
+      }
       let verdict = reported.exitCode === row.exit_code ? 'agrees' : 'exit_code_differs';
       const observedMs = Number.isFinite(row.first_seen_ms) && Number.isFinite(row.exited_at_ms) ? row.exited_at_ms - row.first_seen_ms : null;
       if (verdict === 'agrees' && reported.wallMs !== null && observedMs !== null && observedMs >= 0) {

@@ -685,6 +685,9 @@ class Engine(threading.Thread):
         """The fact these say, begun or added to: one fact for the same thing
         done by the same step, with a count, not one for each time."""
         step = who.get('call_id') or (f"{who.get('pid')}:{who.get('start_ns')}" if who.get('pid') else '')
+        if not step and kind == 'file':
+            # Nobody to name: the same thing ten minutes later is another event, not one more of this one.
+            step = f'@{int(at_ns) // 60_000_000_000}'
         fact_id = hashlib.sha256('\0'.join([box.container, kind, step, *map(str, key)]).encode()).hexdigest()[:32]
         fact = self.facts.get(fact_id)
         if fact is None:
@@ -957,22 +960,41 @@ class Engine(threading.Thread):
         for writer in writers:
             flags |= writer['flags']
         effect = change(before, after, cause['events'], flags)
+        note = None
+        if effect is None and before is None and after is None and 'delete' in cause['events']:
+            # Not there at the last look and not there now, but the watcher saw
+            # it come and go in between. (A temporary file that was renamed
+            # away has no delete: it is the file it became.)
+            made = 'create' in cause['events'] or bool(flags & O_CREAT)
+            if made or 'moved_to' in cause['events']:
+                effect = 'created_and_deleted' if made else 'deleted'
+                note = ('created and deleted again before it was looked at: what it held was never seen' if made
+                        else 'moved to this name and deleted before it was looked at')
+        elif effect is None and before is not None and after is not None and 'modify' in cause['events']:
+            effect = 'rewritten'
+            note = 'written to; it holds the same bytes as before. Whether they were changed and put back is not known'
         if effect:
             box.photos[path] = after
             if after is None and box.known is not None:
                 box.known.discard(path)
             via = None
+            opened, seen = [], set()
+            for writer in reversed(writers):   # the latest to open it first
+                key = (writer['who']['pid'], writer['who']['start_ns'])
+                if key not in seen:
+                    seen.add(key)
+                    opened.append((writer['who'], writer['syscall']))
             if effect in ('deleted', 'renamed'):
                 found = self.actors(box, 'remove' if effect == 'deleted' else 'rename', cause['at_ns'], path)
+            elif effect == 'created_and_deleted':
+                # Whoever deleted it; failing that, whoever made it.
+                found = self.actors(box, 'remove', cause['at_ns'], path) or opened
+                for writer in writers:
+                    writer['credited'] = True
             elif effect == 'permissions_changed':
                 found = self.actors(box, 'metadata', cause['at_ns'], path)
             else:
-                opened, seen = [], set()
-                for writer in reversed(writers):   # the latest to open it first
-                    key = (writer['who']['pid'], writer['who']['start_ns'])
-                    if key not in seen:
-                        seen.add(key)
-                        opened.append((writer['who'], writer['syscall']))
+                for writer in writers:
                     writer['credited'] = True
                 found = None
                 if 'moved_to' in cause['events']:
@@ -992,6 +1014,8 @@ class Engine(threading.Thread):
             who = self.called(box, who, path, cause['at_ns'])
             certainty = 'unattributed' if not found else 'confirmed' if len(found) == 1 else 'one_of'
             basis = {'syscall': call, 'watcher': sorted(cause['events']), 'before': before, 'after': after, 'resolution': 'lexical'}
+            if note:
+                basis['note'] = note
             if via:
                 basis.update(resolution='link', via=via, note='opened under another name that is a link to this file')
             if len(found) > 1:
@@ -1010,7 +1034,8 @@ class Engine(threading.Thread):
                     self.fact(box, 'file', (path, 'opened_for_writing'), writer['who'],
                               {'path': path, 'guard': guard, 'effect': 'opened_for_writing', 'certainty': 'possible',
                                'basis': {'syscall': writer['syscall'], 'flags': writer['flags'], 'before': before, 'after': after,
-                                         'resolution': 'lexical', 'note': 'opened for writing; the file is as it was'}}, writer['at_ns'])
+                                         'resolution': 'lexical',
+                                         'note': 'opened for writing; the file holds the same bytes as before. A write that was put back would look the same'}}, writer['at_ns'])
         for writer in writers:
             if writer.get('gone'):
                 writer['settled'] = True

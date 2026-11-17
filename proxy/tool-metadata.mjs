@@ -27,6 +27,15 @@ export function toolResultFacts(item) {
   if (metadata && typeof metadata.exit_code === 'number') {
     facts.exitCode = metadata.exit_code;
     if (typeof metadata.duration_seconds === 'number') facts.wallMs = Math.round(metadata.duration_seconds * 1000);
+    return facts;
+  }
+  // Claude Code's Bash tool: a failed command's result is an error that
+  // begins "Exit code N"; a command that worked says nothing about its code.
+  // Only an error is read for the code: the same words can be a command's own output.
+  if (typeof output === 'string' || Array.isArray(output)) {
+    const exit = item?.is_error === true ? text.match(/^Exit code (-?\d+)\s*(?:\n|$)/) : null;
+    if (exit) facts.exitCode = Number(exit[1]);
+    else if (item?.is_error !== true) facts.impliedSuccess = true;
   }
   return facts;
 }
