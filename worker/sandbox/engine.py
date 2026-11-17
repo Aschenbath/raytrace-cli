@@ -7,10 +7,11 @@ keeps what matters as a fact, counts the rest and stores no event at all.
 
 What matters:
 
-    files     a file the project's owner restricted or watches, and a new file
-              whose path marks it sensitive (a .env, a key): read, created,
-              changed, emptied, appended, deleted, renamed, or an attempt
-              the kernel refused
+    files     every file of the project (outside node_modules and the
+              like): created, changed, emptied, appended, deleted, renamed,
+              or an attempt the kernel refused. A read is a fact as well for
+              a file the project's owner restricted or watches and one whose
+              path marks it sensitive (a .env, a key); other reads are counted
     network   every connection out of the sandbox, one fact for each
               destination a step reached, and whether the firewall refuses it
     packages  what a package manager left installed once it had run
@@ -83,6 +84,7 @@ ERRNO = {**REFUSED, 2: 'ENOENT', 101: 'ENETUNREACH', 110: 'ETIMEDOUT', 111: 'ECO
 EINPROGRESS = 115
 MAX_HASHED = 5 * 1024 * 1024    # a larger file is compared by size, time and inode
 HASH_LIMIT = 2000               # with more files than this to keep, none is hashed up front
+PROJECT_LIMIT = 20_000          # a project with more files than this keeps facts of listed and sensitive files only
 SENSITIVE_FROM = 4              # file_scan's level from which a new file's path alone is worth a fact
 SETTLE = 0.3                    # seconds between a change seen on disk and looking: gVisor's call may still be on its way
 WRITER_LIFE = 900               # how long an open for writing may explain a later change
@@ -174,6 +176,20 @@ def names_inside(root, path):
         os.close(fd)
 
 
+def link_inside(root, path):
+    """Whether a project path is a symbolic link (read, not followed)."""
+    try:
+        folder = open_inside(root, posixpath.dirname(path), directory=True)
+    except (OSError, ValueError):
+        return False
+    try:
+        return stat.S_ISLNK(os.stat(posixpath.basename(path), dir_fd=folder, follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+    finally:
+        os.close(folder)
+
+
 def change(before, after, events, flags):
     """What happened to a file between two photos, or None when nothing did."""
     if after is None:
@@ -252,6 +268,7 @@ class Inotify:
     """The host kernel's file notifications, for the folders of the files
     worth a fact. It names the file a delete or rename hit, which gVisor does not."""
     CLOSE_WRITE, MODIFY, ATTRIB, CREATE, DELETE, MOVED_FROM, MOVED_TO = 0x8, 0x2, 0x4, 0x100, 0x200, 0x40, 0x80
+    ISDIR = 0x40000000
     DELETE_SELF, MOVE_SELF, OVERFLOW, IGNORED, ONLYDIR = 0x400, 0x800, 0x4000, 0x8000, 0x01000000
     WORDS = [(CLOSE_WRITE, 'close_write'), (MODIFY, 'modify'), (ATTRIB, 'attrib'), (CREATE, 'create'), (DELETE, 'delete'),
              (MOVED_FROM, 'moved_from'), (MOVED_TO, 'moved_to')]
@@ -298,7 +315,8 @@ class Sandbox:
         self.fork = False
         self.mapped = self.guarded_at = None   # the two files' times, as last read
         self.restricted, self.watched, self.sensitive = set(), set(), set()
-        self.guarded = {}        # path -> restricted | watched | sensitive
+        self.project = False     # every project file is kept, not only the listed and sensitive ones
+        self.guarded = {}        # path -> restricted | watched | sensitive | project
         self.hashing = True
         self.photos = {}         # path -> its last photo; None: it was not there
         self.known = None        # project paths that exist, to tell a new file from an old one
@@ -489,7 +507,9 @@ class Engine(threading.Thread):
                     for folder, folders, files in os.walk(workspace):
                         folders[:] = [name for name in folders if name not in SKIPPED]
                         inside = os.path.relpath(folder, workspace)
-                        box.known.update(name if inside == '.' else inside + '/' + name for name in files)
+                        # Not links: a link is a name for another file, and that file is the one kept.
+                        box.known.update(name if inside == '.' else inside + '/' + name for name in files
+                                         if not os.path.islink(os.path.join(folder, name)))
                         if len(box.known) > 200_000:
                             break
                     box.packages = installed(workspace, box.home)
@@ -508,12 +528,17 @@ class Engine(threading.Thread):
                 kept = {}
             box.restricted = {path for path in kept.get('restricted') or [] if isinstance(path, str)}
             box.watched = {path for path in kept.get('watched') or [] if isinstance(path, str)}
+            # Every project file, unless the lists say `"project": false` or there are too many to watch.
+            box.project = kept.get('project') is not False and box.known is not None and len(box.known) <= PROJECT_LIMIT
+            if box.project:
+                box.sensitive.update(path for path in box.known if file_scan.created_entry(path)['level'] >= SENSITIVE_FROM)
             self.guard(box)
         self.arm(box)
 
     def guard(self, box):
         """The files to keep facts of, each with a first photo to compare later ones with."""
-        guarded = {path: 'sensitive' for path in box.sensitive}
+        guarded = {path: 'project' for path in box.known} if box.project else {}
+        guarded.update({path: 'sensitive' for path in box.sensitive})
         guarded.update({path: 'watched' for path in box.watched})
         guarded.update({path: 'restricted' for path in box.restricted})
         box.hashing = len(guarded) <= HASH_LIMIT
@@ -537,6 +562,20 @@ class Engine(threading.Thread):
                 watch = self.inotify.add(box.workspace, folder)
             except (OSError, ValueError):
                 continue
+            box.watches[folder] = watch
+            self.watched[watch] = (box, folder)
+
+    def cover(self, box, path, first=None):
+        """A project file that appeared while the sandbox ran: kept from now
+        on. `first` is what it is compared with: None, it was not there."""
+        box.known.add(path)
+        box.guarded[path], box.photos[path] = 'project', first
+        folder = posixpath.dirname(path)
+        if self.inotify and folder not in box.watches:
+            try:
+                watch = self.inotify.add(box.workspace, folder)
+            except (OSError, ValueError):
+                return
             box.watches[folder] = watch
             self.watched[watch] = (box, folder)
 
@@ -693,6 +732,9 @@ class Engine(threading.Thread):
                     self.guard(box)
                     self.arm(box)
                     guard = 'sensitive'
+                elif box.project and not link_inside(box.workspace, path):
+                    self.cover(box, path)
+                    guard = 'project'
             if guard is None:
                 if writing and not errno and box.guarded:
                     box.aliases.append({'path': path, 'who': who, 'at_ns': at_ns, 'syscall': self.calls.get(event.get('sysno'), ('open', 'open'))[0]})
@@ -706,10 +748,14 @@ class Engine(threading.Thread):
                            'basis': {**basis, 'errno': REFUSED[errno]}}, at_ns)
             return
         if not writing:
+            if guard == 'project':   # reads of ordinary files are counted, as before: a test run reads hundreds
+                return self.counted(box, who, top, at_ns)
             self.fact(box, 'file', (path, 'read'), who, {'path': path, 'guard': guard, 'effect': 'read', 'certainty': 'confirmed',
                       'basis': {**basis, 'note': 'opened for reading; the bytes read are not captured'}}, at_ns)
             return
         now = self.clock()
+        if guard == 'project':   # it may be a hard link to another kept file: see linked()
+            box.aliases.append({'path': path, 'who': who, 'at_ns': at_ns, 'syscall': call})
         box.writers.setdefault(path, []).append({'who': who, 'at_ns': at_ns, 'flags': flags, 'syscall': call, 'credited': False, 'seen': now})
         box.due[path] = min(box.due.get(path, now + 1), now + 1)
         box.final[path] = now + 30
@@ -753,8 +799,9 @@ class Engine(threading.Thread):
                     if not at or path.startswith(at + '/'):
                         found.setdefault(path, 'argv_folder')
         if not found:
+            # Not for ordinary project files: a short name is in any text.
             text = ' '.join(who.get('argv') or [])
-            found = {path: 'argv_text' for path in box.guarded if path in text}
+            found = {path: 'argv_text' for path, guard in box.guarded.items() if guard != 'project' and path in text}
         return sorted(found.items())[:5]
 
     def actors(self, box, rule, at_ns, path):
@@ -775,6 +822,9 @@ class Engine(threading.Thread):
         events = self.inotify.read()
         moved = {cookie: posixpath.join(self.watched[watch][1], name) for watch, mask, cookie, name in events
                  if mask & Inotify.MOVED_TO and watch in self.watched}
+        # Kept files that were renamed: the new name is the same file, not a new one.
+        renamed = {cookie for watch, mask, cookie, name in events if mask & Inotify.MOVED_FROM and watch in self.watched
+                   and posixpath.join(self.watched[watch][1], name) in self.watched[watch][0].guarded}
         for watch, mask, cookie, name in events:
             if mask & Inotify.OVERFLOW:   # the kernel dropped notices: look at everything again
                 for box in self.boxes.values():
@@ -796,10 +846,33 @@ class Engine(threading.Thread):
                         self.noticed(box, path, [])
                 continue
             path = posixpath.join(folder, name)
+            if path not in box.guarded and box.project and mask & (Inotify.CREATE | Inotify.MOVED_TO) and name not in SKIPPED:
+                self.appeared(box, path, bool(mask & Inotify.ISDIR), cookie in renamed)
             if path in box.guarded:
                 self.noticed(box, path, [word for bit, word in Inotify.WORDS if mask & bit],
                              moved.get(cookie) if mask & Inotify.MOVED_FROM else None)
         return len(events)
+
+    def appeared(self, box, path, folder, renamed):
+        """A name the watcher saw arrive in a project that is kept whole, with
+        no open that created it: a file moved in, or a folder with its files."""
+        if not folder:
+            if len(box.guarded) < PROJECT_LIMIT:
+                # A kept file under its new name has its `renamed` fact already.
+                self.cover(box, path, photo(box.workspace, path, box.hashing) if renamed else None)
+            return
+        folders = [path]
+        while folders and len(box.guarded) < PROJECT_LIMIT:
+            at = folders.pop()
+            for name in names_inside(box.workspace, at):
+                below = posixpath.join(at, name)
+                if name in SKIPPED or below in box.guarded:
+                    continue
+                if photo(box.workspace, below, False) is not None:
+                    self.cover(box, below)
+                    self.noticed(box, below, ['moved_to' if renamed else 'create'])
+                else:
+                    folders.append(below)   # no folder, or an empty one, lists nothing
 
     def noticed(self, box, path, words, moved_to=None):
         """The watcher saw something of a file: look at it once things settle."""
@@ -822,7 +895,8 @@ class Engine(threading.Thread):
         writers = box.writers[path] = [writer for writer in box.writers.get(path, [])
                                        if now - writer['seen'] < WRITER_LIFE and not writer.get('settled')]
         before = box.photos.get(path)
-        after = photo(box.workspace, path, box.hashing)
+        # With too many files to hash up front, one that was seen to change is still hashed here.
+        after = photo(box.workspace, path, box.hashing or (box.project and bool(cause['events'] or writers)))
         flags = 0
         for writer in writers:
             flags |= writer['flags']
@@ -870,7 +944,9 @@ class Engine(threading.Thread):
             fact['basis']['after'] = after
             if cause.get('to'):
                 fact['to'] = cause['to']
-        elif final:
+        elif final and not (guard == 'project' and before is None and after is None):
+            # (An ordinary file that came and went between two looks, as the
+            # temporary file of an editor's save does, is not worth a line.)
             for writer in writers:
                 if not writer['credited']:
                     writer['credited'] = True
@@ -883,6 +959,11 @@ class Engine(threading.Thread):
                 writer['settled'] = True
         if not writers:
             box.writers.pop(path, None)
+        if guard == 'project' and after is None and (effect or final):
+            # Gone: nothing more to compare. It is kept again if it comes back.
+            box.guarded.pop(path, None)
+            box.photos.pop(path, None)
+            box.known.discard(path)
 
     def linked(self, box, path, after, at_ns):
         """A recent open for writing of another name that is this file: a hard

@@ -108,7 +108,10 @@ export function vmStatus() {
 
 function setupVersion() {
   const hash = createHash('sha256');
-  for (const name of readdirSync(SOURCE).sort()) hash.update(name).update(readFileSync(join(SOURCE, name)));
+  // Files only: a __pycache__ left by running the tests there is no part of what is installed.
+  for (const entry of readdirSync(SOURCE, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+    if (entry.isFile()) hash.update(entry.name).update(readFileSync(join(SOURCE, entry.name)));
+  }
   return hash.digest('hex').slice(0, 16);
 }
 
