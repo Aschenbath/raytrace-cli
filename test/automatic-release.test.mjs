@@ -86,8 +86,9 @@ test('a version bumped on main by hand is the floor', t => {
 test('a version another release took first is passed over', t => {
   const f = fixture(t);
   // The pre-push hook stands in for another release landing v0.13.1 while ours was being made.
+  // A plain tag: an annotated one needs a git identity, which a CI runner does not have.
   const hook = join(f.cwd, '.git/hooks/pre-push');
-  writeFileSync(hook, '#!/bin/sh\nif [ ! -f "$RAYTRACE_RACE_MARKER" ]; then\n  touch "$RAYTRACE_RACE_MARKER"\n  git --git-dir="$RAYTRACE_REMOTE" tag -a v0.13.1 -m taken main\nfi\n', { mode: 0o755 });
+  writeFileSync(hook, '#!/bin/sh\nif [ ! -f "$RAYTRACE_RACE_MARKER" ]; then\n  touch "$RAYTRACE_RACE_MARKER"\n  git --git-dir="$RAYTRACE_REMOTE" tag v0.13.1 main\nfi\n', { mode: 0o755 });
   const old = [process.env.RAYTRACE_REMOTE, process.env.RAYTRACE_RACE_MARKER];
   process.env.RAYTRACE_REMOTE = f.remote;
   process.env.RAYTRACE_RACE_MARKER = join(f.root, 'raced');
