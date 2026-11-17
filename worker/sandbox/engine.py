@@ -106,6 +106,11 @@ CALL_MARKER = re.compile(r'(?:^|[\s;\'"])export RAYTRACE_CALL_ID=([A-Za-z0-9_-]{
 # RayTrace's own hook in the sandbox: after each tool call it runs git over the
 # whole project to keep a snapshot. What it and its children do is not the agent's doing.
 OWN_HOOK = '/opt/raytace-claude/hook.mjs'
+# The hook announces a file tool's call around the tool, as a program it starts:
+# `true raytrace-tool begin|end <tool> <path>`, with the call id in its environment.
+# The agent's file tools run inside the agent itself, which carries no call id.
+TOOL_MARK = 'raytrace-tool'
+TOOL_SLACK = (200_000_000, 2_000_000_000)   # ns a file event may precede the begin, or follow the end
 SANDBOX_ID = re.compile(r'rt[pf]-[a-f0-9]{32}')
 
 
@@ -330,6 +335,7 @@ class Sandbox:
         self.final = {}          # path -> when to stop waiting for a change
         self.causes = {}         # path -> what the watcher saw of it since the last look
         self.raw = collections.deque(maxlen=512)   # recent delete, rename, resize and mode calls: they carry no path
+        self.tools = collections.deque(maxlen=256)   # file tool calls the hook announced: {call_id, path, pids, begin_ns, end_ns}
         self.aliases = collections.deque(maxlen=256)   # recent opens for writing of files not kept: one may be a link to a kept file
         self.watches = {}        # folder -> inotify watch
         self.counts = {}         # step -> opens that were only counted
@@ -611,9 +617,39 @@ class Engine(threading.Thread):
                               'call_id': marker or known.get('call_id') or parent.get('call_id'),
                               'own': bool(known.get('own') or parent.get('own')
                                           or (len(argv) > 1 and argv[1] == OWN_HOOK and posixpath.basename(argv[0]) == 'node'))}
+        if box.processes[pid]['own'] and argv[1:2] == [TOOL_MARK] and len(argv) == 5 and marker:
+            self.announced(box, pid, marker, argv[2], argv[4], int(event.get('timestamp_ns') or 0) or time.time_ns())
         if len(box.processes) > 20_000:   # exits that never arrived: forget the oldest half
             for stale in list(box.processes)[:10_000]:
                 del box.processes[stale]
+
+    def announced(self, box, pid, call_id, phase, path, at_ns):
+        """The hook saying a file tool is about to touch `path`, or has."""
+        if phase == 'end':
+            for tool in reversed(box.tools):
+                if tool['call_id'] == call_id and tool['path'] == path:
+                    tool['end_ns'] = at_ns
+                    break
+            return
+        # Whoever started the hook is the agent: the tool runs in that process.
+        pids, at = set(), pid
+        for _ in range(8):
+            at = (box.processes.get(at) or {}).get('ppid')
+            if not at or at in pids:
+                break
+            pids.add(at)
+        box.tools.append({'call_id': call_id, 'path': path, 'pids': pids, 'begin_ns': at_ns, 'end_ns': None})
+
+    def called(self, box, who, path, at_ns):
+        """`who`, with the tool call the hook announced for this file about
+        then, when the process carries none of its own."""
+        if who.get('call_id') or who.get('own') or not who.get('pid'):
+            return who
+        for tool in reversed(box.tools):   # the latest to begin first
+            if (tool['path'] == path and who['pid'] in tool['pids'] and tool['begin_ns'] - TOOL_SLACK[0] <= at_ns
+                    and (tool['end_ns'] is None or at_ns <= tool['end_ns'] + TOOL_SLACK[1])):
+                return {**who, 'call_id': tool['call_id'], 'call_from': 'tool_report'}
+        return who
 
     def exited(self, box, event):
         gone = box.processes.pop(event.get('pid'), None)
@@ -656,6 +692,8 @@ class Engine(threading.Thread):
                 'fact_id': fact_id, 'container_id': box.container, 'kind': kind, 'count': 0, 'first_ns': str(at_ns),
                 'pid': who.get('pid'), 'process_start_ns': who.get('start_ns'), 'process': who.get('name'),
                 'command': ' '.join(who.get('argv') or [])[:160] or None, 'call_id': who.get('call_id'), **body}
+            if who.get('call_from'):   # not carried by the process: the hook said which call was at this file
+                fact['call_from'] = who['call_from']
             if box.fork:
                 fact['fork'] = True
         fact['count'] += 1
@@ -745,6 +783,7 @@ class Engine(threading.Thread):
                 if writing and not errno and box.guarded:
                     box.aliases.append({'path': path, 'who': who, 'at_ns': at_ns, 'syscall': self.calls.get(event.get('sysno'), ('open', 'open'))[0]})
                 return self.counted(box, who, top, at_ns)
+        who = self.called(box, who, path, at_ns)
         call = self.calls.get(event.get('sysno'), ('open', 'open'))[0]
         basis = {'syscall': call, 'flags': flags, 'resolution': 'lexical'}
         if errno:
@@ -950,6 +989,7 @@ class Engine(threading.Thread):
                     if link:
                         found, via = [(link['who'], link['syscall'])], link['path']
             who, call = found[0] if found else ({}, None)
+            who = self.called(box, who, path, cause['at_ns'])
             certainty = 'unattributed' if not found else 'confirmed' if len(found) == 1 else 'one_of'
             basis = {'syscall': call, 'watcher': sorted(cause['events']), 'before': before, 'after': after, 'resolution': 'lexical'}
             if via:

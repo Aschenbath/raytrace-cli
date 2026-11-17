@@ -126,8 +126,15 @@ B. **A shell redirect (`echo x > file`) in a Bash call had no call id.** The
    engine's pattern did not allow. *Fixed.*
 C. **Each tool call added about 13 `read` facts** for sensitive and watched
    files, by the hook's `git add`. *Fixed:* counted, not listed.
-D. Open: a file that lives under a second inside one command leaves no fact
-   (finding 6); the Read, Write and Edit tools run inside the agent process, so
-   their facts name the agent but no tool call; `reported_check` is never set.
+D. **The Read, Write and Edit tools run inside the agent process, so their
+   facts named the agent but no tool call.** *Fixed:* the hook announces each
+   file tool's call to the recorder before and after the tool
+   (`true raytrace-tool begin|end <tool> <path>`, the call id in its
+   environment), and the agent's activity on that file in between is joined to
+   the call (`call_from: tool_report`). Costs one hook start before each Read.
+   Open: a file that lives under a second inside one command leaves no fact
+   (finding 6); `reported_check` is never set.
+F. A sandbox kept the hook it was created with: `start` put the VM's stored
+   copy back. *Fixed:* `sandbox start` and `connect` install the current hook.
 E. A process `docker exec` starts directly has no exec event (finding 7), so
    no call id from its environment: tests must go through `sh -c`.
