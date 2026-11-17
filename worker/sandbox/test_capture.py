@@ -211,5 +211,122 @@ class FailedExecs(unittest.TestCase):
         self.assertNotIn('raw_packet_base64', json.loads(json.dumps(failed)))
 
 
+
+class EveryProjectFile(unittest.TestCase):
+    """A project kept whole: what happens to any of its files is a fact, not
+    only to the files on a list."""
+    SID = 'rtp-' + 'a' * 32
+
+    def setUp(self):
+        self.now = 1000.0
+        self.engine = engine.Engine(':memory:', arch='aarch64', watch=False, clock=lambda: self.now)
+        self.folder = tempfile.TemporaryDirectory()
+        self.state = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        self.addCleanup(self.state.cleanup)
+        for name in ('CONTAINERS', 'GUARDRAILS', 'PROJECT_LIMIT'):
+            self.addCleanup(setattr, engine, name, getattr(engine, name))
+        engine.CONTAINERS = engine.GUARDRAILS = Path(self.state.name)
+        for name, text in (('src/app.js', 'one'), ('config/payment-keys.js', 'key'), ('node_modules/x/index.js', 'x')):
+            self.write(name, text)
+        (Path(self.state.name) / ('c' * 64 + '.json')).write_text(json.dumps({'id': self.SID, 'workspace': self.folder.name}))
+        self.box = engine.Sandbox('c' * 64)
+        self.box.processes[10] = {'start_ns': '10', 'ppid': 1, 'name': 'sed', 'argv': ['sed'], 'call_id': 'call_10'}
+
+    def write(self, name, text):
+        path = Path(self.folder.name) / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def opened(self, name, flags=engine.O_TRUNC | 1):
+        self.engine.opened(self.box, {'kind': 'open', 'pathname': '/workspace/' + name, 'flags': flags, 'errno': 0, 'pid': 10,
+                                      'ppid': 1, 'process_start_ns': '10', 'timestamp_ns': str(time.time_ns()), 'sysno': 56})
+
+    def looked(self, name, *words, final=False):
+        if words:
+            self.engine.noticed(self.box, name, list(words))
+        self.engine.look(self.box, name, final=final)
+        return [(fact['path'], fact['effect'], fact['guard'], fact['call_id']) for fact in self.engine.facts.values() if fact['kind'] == 'file']
+
+    def test_every_file_outside_the_skipped_folders_is_kept(self):
+        self.engine.refresh(self.box)
+        self.assertEqual(self.box.guarded, {'src/app.js': 'project', 'config/payment-keys.js': 'sensitive'})
+
+    def test_the_lists_can_turn_it_off_and_a_huge_project_is_not_kept_whole(self):
+        (Path(self.state.name) / (self.SID + '.json')).write_text(json.dumps({'restricted': [], 'watched': ['src/app.js'], 'project': False}))
+        self.engine.refresh(self.box)
+        self.assertEqual(self.box.guarded, {'src/app.js': 'watched'})
+        engine.PROJECT_LIMIT = 1
+        other = engine.Sandbox('c' * 64)
+        (Path(self.state.name) / (self.SID + '.json')).unlink()
+        self.engine.refresh(other)
+        self.assertEqual(other.guarded, {})
+
+    def test_an_edit_is_a_fact_and_a_read_is_counted(self):
+        self.engine.refresh(self.box)
+        self.opened('src/app.js', flags=0)
+        self.assertEqual(self.looked('src/app.js'), [])
+        self.opened('src/app.js')
+        self.write('src/app.js', 'two')
+        self.assertEqual(self.looked('src/app.js', 'modify', 'close_write'), [('src/app.js', 'changed', 'project', 'call_10')])
+        # A sensitive file that was there from the start: its read is a fact too.
+        self.opened('config/payment-keys.js', flags=0)
+        self.assertIn(('config/payment-keys.js', 'read', 'sensitive', 'call_10'), self.looked('config/payment-keys.js'))
+
+    def test_a_new_file_is_created_and_a_deleted_one_is_let_go(self):
+        self.engine.refresh(self.box)
+        self.opened('src/new.js', flags=engine.O_CREAT | 1)
+        self.write('src/new.js', 'new')
+        self.assertEqual(self.looked('src/new.js', 'create', 'close_write'), [('src/new.js', 'created', 'project', 'call_10')])
+        (Path(self.folder.name) / 'src/new.js').unlink()
+        self.assertIn(('src/new.js', 'deleted', 'project', None), self.looked('src/new.js', 'delete'))
+        self.assertNotIn('src/new.js', self.box.guarded)
+        self.assertNotIn('src/new.js', self.box.known)
+
+    def test_the_temporary_file_of_a_save_leaves_no_line(self):
+        self.engine.refresh(self.box)
+        self.opened('src/sedAbC', flags=engine.O_CREAT | 1)
+        self.write('src/sedAbC', 'two')
+        os.rename(Path(self.folder.name) / 'src/sedAbC', Path(self.folder.name) / 'src/app.js')
+        self.engine.numbered_call(self.box, {'kind': 'syscall_return', 'sysno': 38, 'errno': 0, 'pid': 10, 'ppid': 1,
+                                             'process_start_ns': '10', 'timestamp_ns': str(time.time_ns()), 'cwd': '/workspace'})
+        self.assertEqual(self.looked('src/app.js', 'moved_to'), [('src/app.js', 'changed', 'project', 'call_10')])
+        self.assertEqual(len(self.looked('src/sedAbC', 'moved_from', final=True)), 1)
+        self.assertNotIn('src/sedAbC', self.box.guarded)
+
+    def test_a_file_or_a_folder_moved_in_is_kept(self):
+        self.engine.refresh(self.box)
+        self.write('src/moved.js', 'm')
+        self.engine.appeared(self.box, 'src/moved.js', False, False)
+        self.assertEqual(self.looked('src/moved.js', 'moved_to'), [('src/moved.js', 'created', 'project', None)])
+        self.write('lib/deep/a.js', 'a')
+        self.write('lib/node_modules/b.js', 'b')
+        self.engine.appeared(self.box, 'lib', True, False)
+        self.assertEqual({path for path in self.box.guarded if path.startswith('lib/')}, {'lib/deep/a.js'})
+        # A kept file under a new name is the same file: no second line for it.
+        os.rename(Path(self.folder.name) / 'src/app.js', Path(self.folder.name) / 'src/main.js')
+        self.engine.appeared(self.box, 'src/main.js', False, True)
+        self.assertEqual([fact for fact in self.looked('src/main.js', 'moved_to') if fact[0] == 'src/main.js'], [])
+
+
+    def test_a_write_through_a_link_is_still_the_writers(self):
+        os.symlink('app.js', Path(self.folder.name) / 'src/alias.js')
+        self.engine.refresh(self.box)
+        self.assertNotIn('src/alias.js', self.box.guarded)
+        self.opened('src/alias.js', flags=engine.O_CREAT | engine.O_TRUNC | 1)
+        self.assertNotIn('src/alias.js', self.box.guarded)
+        self.write('src/app.js', 'through the link')
+        self.looked('src/app.js', 'modify', 'close_write')
+        (fact,) = self.engine.facts.values()
+        self.assertEqual((fact['call_id'], fact['certainty'], fact['basis']['via']), ('call_10', 'confirmed', 'src/alias.js'))
+        self.engine.facts.clear()
+        os.link(Path(self.folder.name) / 'src/app.js', Path(self.folder.name) / 'src/hard.js')
+        self.opened('src/hard.js', flags=engine.O_CREAT | 1)
+        self.write('src/hard.js', 'through the hard link')
+        self.looked('src/app.js', 'modify', 'close_write')
+        (fact,) = [fact for fact in self.engine.facts.values() if fact['path'] == 'src/app.js']
+        self.assertEqual((fact['call_id'], fact['basis']['via']), ('call_10', 'src/hard.js'))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -99,7 +99,7 @@ export function SandboxActivity({ box, stepFor, onOpenCall }: {
   const nothing = !data.network.length && !data.packages.length && !data.files.length && !data.lookups.length && !data.bulk.length && !data.identity.length;
   const gaps = [...data.network, ...data.files, ...data.packages].some((fact) => fact.coverage === 'gaps');
   if (nothing) return <p className="rt-empty">Nothing recorded yet. The kernel layer of the sandbox reports every connection the agent makes, the packages it installs,
-    and what happens to files marked Report or Restrict. A sandbox started before this was turned on reports once it is stopped and started again.</p>;
+    and what happens to the project's files. A sandbox started before this was turned on reports once it is stopped and started again.</p>;
 
   return <>
     {gaps && <p className="rt-problem">Some events were lost while these were recorded, so a row marked <em>gaps</em> may not be all that happened.</p>}
@@ -137,14 +137,14 @@ export function SandboxActivity({ box, stepFor, onOpenCall }: {
         </tr>)}</tbody>
       </table></div>}
 
-    <div className="rt-list-head"><span>FILES, AS THE KERNEL SAW THEM</span><small>files marked Report or Restrict, and new sensitive ones</small></div>
-    {!data.files.length ? <p className="rt-empty">Nothing happened to a file marked Report or Restrict.</p> :
+    <div className="rt-list-head"><span>FILES, AS THE KERNEL SAW THEM</span><small>every project file; reads only of sensitive, Report and Restrict files</small></div>
+    {!data.files.length ? <p className="rt-empty">Nothing happened to a project file.</p> :
       <div className="rt-table-wrap"><table className="rt-table rt-scan">
         <thead><tr><th>When</th><th>File</th><th>What happened</th><th>How sure</th><th>Program</th><th>Step</th></tr></thead>
         <tbody>{data.files.map((fact) => <tr key={fact.id} className={fact.effect === 'attempted' ? 'rt-fact-refused' : undefined} title={basisOf(fact)}>
           <td><time>{when(fact.at)}</time></td>
           <td>{fact.path ? <code>{fact.path}</code> : <span className="rt-muted" title="gVisor reports this call by number, without its path.">file not reported</span>}
-            {fact.guard && <span className="rt-flag">{fact.guard}</span>}</td>
+            {fact.guard && fact.guard !== 'project' && <span className="rt-flag">{fact.guard}</span>}</td>
           <td>{EFFECT_WORDS[fact.effect] ?? fact.effect}{fact.effect === 'attempted' && fact.intent ? `: ${INTENT_WORDS[fact.intent] ?? fact.intent}` : ''}
             {fact.to ? <> to <code>{fact.to}</code></> : null}{times(fact.count)}
             {fact.basis?.errno && <span className="rt-muted"> ({fact.basis.errno})</span>}</td>
@@ -166,7 +166,7 @@ export function SandboxActivity({ box, stepFor, onOpenCall }: {
       `${fact.basis?.syscall ?? 'setid'}(${fact.ids.join(', ')}) by ${fact.process ?? 'a process'}, ${fact.effect === 'changed' ? 'allowed' : `refused${fact.basis?.errno ? ` (${fact.basis.errno})` : ''}`}`).join('; ')}.</p>}
 
     <p className="rt-foot">Seen by the kernel layer of the sandbox and its host, not reported by the agent. An address is what a program connected to; the name beside it is the
-      lookup that answered with it. HTTPS contents are not read. A file that was read is one opened for reading. A file not marked Report or Restrict is counted, not listed.</p>
+      lookup that answered with it. HTTPS contents are not read. A file that was read is one opened for reading. Reads of ordinary project files are counted, not listed, and so is everything under folders like node_modules.</p>
   </>;
 }
 

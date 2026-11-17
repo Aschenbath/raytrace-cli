@@ -102,7 +102,8 @@ type Fact = {
 export type FileFact = Fact & {
   /** Null when the kernel refused a call whose file gVisor does not report. */
   path: string | null;
-  guard: 'restricted' | 'watched' | 'sensitive' | null;
+  /** `project`: an ordinary project file, on no list. */
+  guard: 'restricted' | 'watched' | 'sensitive' | 'project' | null;
   effect: 'read' | 'created' | 'changed' | 'emptied' | 'appended' | 'deleted' | 'renamed' | 'permissions_changed' | 'attempted' | 'opened_for_writing';
   certainty: Certainty;
   /** What a refused call was trying to do. */

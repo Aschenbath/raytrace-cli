@@ -57,13 +57,16 @@ VM, and compare its SHA-256 with the last `changed` fact's `basis.after.sha256`.
 ## Findings (first run)
 
 1. **Local sandboxes record no file activity for ordinary project files.**
-   The engine keeps a file fact only for a restricted or watched file, or a new
-   file with a sensitive name. `proxy/raytace-proxy.mjs:463` says those lists
-   "are not kept for local sandboxes yet", and nothing local calls
-   `set-guardrails`. Create, edit, rename, delete of any unlisted file, and a
-   read of the existing `config/payment-keys.js`, left nothing. By design, but
-   it is most of what a user would expect "file access" to mean. *Medium:* a
-   local way to set the lists; *large:* facts for every project file.
+   *Fixed (2026-11-17):* the engine now keeps a fact for every project file
+   outside the skipped folders (`node_modules`, `.git`, build output), with
+   guard `project`: created, changed, appended, emptied, renamed, deleted, and
+   refused attempts. Existing files with a sensitive path (`config/payment-keys.js`)
+   also get read facts. Still not recorded: reads of ordinary files (counted
+   per step only), projects over 20,000 files (falls back to listed and
+   sensitive files), and a file moved into a folder that holds no other
+   project file. There is still no local command to set the Report and
+   Restrict lists. Rerun: phase `a` gave a fact for every file test, each
+   credited to its own step.
 2. **Calls gVisor reports by number arrive with no process or sandbox, so the
    engine discards them.** Message type 6 carries no `context_data` in this
    release (decoded packet: fields 2, 4-10 only). `engine.handle` returns on an
