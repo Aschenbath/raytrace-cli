@@ -208,6 +208,16 @@ test('a result with no code and no error agrees with an observed exit 0, and is 
   });
 });
 
+test('reported_check is set when a process is tied to its call after both have finished', () => withStore((store) => {
+  // The command ran and exited before its call was recorded, as a transcript that arrives late leaves it.
+  const top = store.recordProcessStart({ containerId: CONTAINER, projectId: SESSION, raw: exec(1, 108, 10, ['/bin/bash', '-c', 'ls /nope'], '1000', 1_790_000_000_500), startedMs: 1_790_000_000_500 });
+  store.recordProcessExit({ containerId: CONTAINER, raw: exit(2, 108, '1000', 2, 1_790_000_000_600), endedMs: 1_790_000_000_600, exit_code: 2 });
+  captureDemo(store, { reported: HEADER(2, 0.1) });
+  const [candidate] = store.candidatesInWindow(0, Number.MAX_SAFE_INTEGER, { sessionId: SESSION });
+  store.attribute({ toolCallId: candidate.call_id, eventId: top.eventId, method: 'marker', confidence: 'exact', score: 1 });
+  assert.equal(one(store, "SELECT reported_check FROM runtime_attributions WHERE method = 'marker'").reported_check, 'agrees');
+}));
+
 test('attributionsForProcesses marks own, inherited and unattributed processes by pid + start time', () => withStore((store) => {
   captureDemo(store);
   observeDemo(store);
