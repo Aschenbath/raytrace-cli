@@ -101,7 +101,11 @@ MAX_PACKAGES = 400
 REJECTED = [ipaddress.ip_network(block) for block in network.REJECTED]
 OWN_KINDS = frozenset(['open', 'connect', 'listen', 'setid'])
 PROCESS_KINDS = frozenset(['exec_succeeded', 'clone', 'process_exit', 'collection_gap', 'collector_disconnected'])
-CALL_MARKER = re.compile(r'(?:^|[\s;])export RAYTRACE_CALL_ID=([A-Za-z0-9_-]{1,128})(?=[\s;]|$)')
+# Claude Code runs a command as `bash -c "... eval '<command>'"`: the export follows a quote.
+CALL_MARKER = re.compile(r'(?:^|[\s;\'"])export RAYTRACE_CALL_ID=([A-Za-z0-9_-]{1,128})(?=[\s;]|$)')
+# RayTrace's own hook in the sandbox: after each tool call it runs git over the
+# whole project to keep a snapshot. What it and its children do is not the agent's doing.
+OWN_HOOK = '/opt/raytace-claude/hook.mjs'
 SANDBOX_ID = re.compile(r'rt[pf]-[a-f0-9]{32}')
 
 
@@ -604,7 +608,9 @@ class Engine(threading.Thread):
         box.processes[pid] = {'start_ns': event.get('process_start_ns'), 'ppid': event.get('ppid'),
                               'name': posixpath.basename(event.get('executable') or (argv[0] if argv else '')) or event.get('process_name'),
                               'argv': [part[:400] for part in argv[:24]],
-                              'call_id': marker or known.get('call_id') or parent.get('call_id')}
+                              'call_id': marker or known.get('call_id') or parent.get('call_id'),
+                              'own': bool(known.get('own') or parent.get('own')
+                                          or (len(argv) > 1 and argv[1] == OWN_HOOK and posixpath.basename(argv[0]) == 'node'))}
         if len(box.processes) > 20_000:   # exits that never arrived: forget the oldest half
             for stale in list(box.processes)[:10_000]:
                 del box.processes[stale]
@@ -635,7 +641,7 @@ class Engine(threading.Thread):
         parent = box.processes.get(event.get('ppid')) or {}
         return {'pid': pid, 'start_ns': known.get('start_ns') or event.get('process_start_ns'),
                 'name': known.get('name') or event.get('process_name') or None, 'argv': known.get('argv') or [],
-                'call_id': known.get('call_id') or parent.get('call_id')}
+                'call_id': known.get('call_id') or parent.get('call_id'), 'own': bool(known.get('own') or parent.get('own'))}
 
     # ------------------------------------------------------------ facts
 
@@ -748,7 +754,9 @@ class Engine(threading.Thread):
                            'basis': {**basis, 'errno': REFUSED[errno]}}, at_ns)
             return
         if not writing:
-            if guard == 'project':   # reads of ordinary files are counted, as before: a test run reads hundreds
+            # Reads of ordinary files are counted, as before: a test run reads hundreds.
+            # So is the snapshot hook reading every file after each tool call.
+            if guard == 'project' or who.get('own'):
                 return self.counted(box, who, top, at_ns)
             self.fact(box, 'file', (path, 'read'), who, {'path': path, 'guard': guard, 'effect': 'read', 'certainty': 'confirmed',
                       'basis': {**basis, 'note': 'opened for reading; the bytes read are not captured'}}, at_ns)
@@ -809,7 +817,9 @@ class Engine(threading.Thread):
         about when the watcher saw `path` change, likeliest first."""
         found = {}
         for call in box.raw:
-            if call['rule'] == rule and not call['errno'] and at_ns - RAW_WINDOW[0] <= call['at_ns'] <= at_ns + RAW_WINDOW[1]:
+            # (Not the snapshot hook's git, which renames its own index beside every tool call.)
+            if (call['rule'] == rule and not call['errno'] and not call['who'].get('own')
+                    and at_ns - RAW_WINDOW[0] <= call['at_ns'] <= at_ns + RAW_WINDOW[1]):
                 found.setdefault((call['who']['pid'], call['who']['start_ns']), call)
         names = lambda call: any(posixpath.basename(path) == posixpath.basename(part) for part in call['who']['argv'])
         ranked = sorted(found.values(), key=lambda call: (not names(call), abs(call['at_ns'] - at_ns)))
@@ -823,7 +833,8 @@ class Engine(threading.Thread):
         moved = {cookie: posixpath.join(self.watched[watch][1], name) for watch, mask, cookie, name in events
                  if mask & Inotify.MOVED_TO and watch in self.watched}
         # Kept files that were renamed: the new name is the same file, not a new one.
-        renamed = {cookie for watch, mask, cookie, name in events if mask & Inotify.MOVED_FROM and watch in self.watched
+        renamed = {cookie: posixpath.join(self.watched[watch][1], name) for watch, mask, cookie, name in events
+                   if mask & Inotify.MOVED_FROM and watch in self.watched
                    and posixpath.join(self.watched[watch][1], name) in self.watched[watch][0].guarded}
         for watch, mask, cookie, name in events:
             if mask & Inotify.OVERFLOW:   # the kernel dropped notices: look at everything again
@@ -847,19 +858,25 @@ class Engine(threading.Thread):
                 continue
             path = posixpath.join(folder, name)
             if path not in box.guarded and box.project and mask & (Inotify.CREATE | Inotify.MOVED_TO) and name not in SKIPPED:
-                self.appeared(box, path, bool(mask & Inotify.ISDIR), cookie in renamed)
+                self.appeared(box, path, bool(mask & Inotify.ISDIR), renamed.get(cookie))
             if path in box.guarded:
                 self.noticed(box, path, [word for bit, word in Inotify.WORDS if mask & bit],
                              moved.get(cookie) if mask & Inotify.MOVED_FROM else None)
         return len(events)
 
-    def appeared(self, box, path, folder, renamed):
+    def appeared(self, box, path, folder, source=None):
         """A name the watcher saw arrive in a project that is kept whole, with
-        no open that created it: a file moved in, or a folder with its files."""
+        no open that created it: a file moved in, or a folder with its files.
+        `source` is the kept file it was renamed from, if it was one."""
+        renamed = source is not None
         if not folder:
             if len(box.guarded) < PROJECT_LIMIT:
                 # A kept file under its new name has its `renamed` fact already.
-                self.cover(box, path, photo(box.workspace, path, box.hashing) if renamed else None)
+                # Not one that was never looked at under its old name: a file
+                # written under a temporary name and moved here, as an agent's
+                # Write tool saves a new file. That is this file being created.
+                seen = renamed and box.photos.get(source) is not None
+                self.cover(box, path, photo(box.workspace, path, box.hashing) if seen else None)
             return
         folders = [path]
         while folders and len(box.guarded) < PROJECT_LIMIT:

@@ -297,17 +297,57 @@ class EveryProjectFile(unittest.TestCase):
     def test_a_file_or_a_folder_moved_in_is_kept(self):
         self.engine.refresh(self.box)
         self.write('src/moved.js', 'm')
-        self.engine.appeared(self.box, 'src/moved.js', False, False)
+        self.engine.appeared(self.box, 'src/moved.js', False)
         self.assertEqual(self.looked('src/moved.js', 'moved_to'), [('src/moved.js', 'created', 'project', None)])
         self.write('lib/deep/a.js', 'a')
         self.write('lib/node_modules/b.js', 'b')
-        self.engine.appeared(self.box, 'lib', True, False)
+        self.engine.appeared(self.box, 'lib', True)
         self.assertEqual({path for path in self.box.guarded if path.startswith('lib/')}, {'lib/deep/a.js'})
         # A kept file under a new name is the same file: no second line for it.
         os.rename(Path(self.folder.name) / 'src/app.js', Path(self.folder.name) / 'src/main.js')
-        self.engine.appeared(self.box, 'src/main.js', False, True)
+        self.engine.appeared(self.box, 'src/main.js', False, 'src/app.js')
         self.assertEqual([fact for fact in self.looked('src/main.js', 'moved_to') if fact[0] == 'src/main.js'], [])
 
+    RENAME = {'kind': 'syscall_return', 'sysno': 38, 'errno': 0, 'ppid': 1, 'cwd': '/workspace'}
+
+    def test_a_new_file_saved_under_a_temporary_name_is_created_by_the_mover(self):
+        """How an agent's Write tool saves: it writes a temporary file and
+        renames it, while the snapshot hook's git renames its own index."""
+        self.engine.refresh(self.box)
+        self.engine.executed(self.box, {'pid': 30, 'ppid': 1, 'process_start_ns': '30', 'executable': '/usr/local/bin/node',
+                                        'argv': ['node', engine.OWN_HOOK]})
+        self.engine.executed(self.box, {'pid': 31, 'ppid': 30, 'process_start_ns': '31', 'executable': '/usr/bin/git', 'argv': ['git', 'add', '-A']})
+        self.opened('src/new.js.tmp.1', flags=engine.O_CREAT | 1)
+        self.write('src/new.js.tmp.1', 'new')
+        os.rename(Path(self.folder.name) / 'src/new.js.tmp.1', Path(self.folder.name) / 'src/new.js')
+        for pid in (31, 10):
+            self.engine.numbered_call(self.box, {**self.RENAME, 'pid': pid, 'process_start_ns': str(pid), 'timestamp_ns': str(time.time_ns())})
+        self.engine.appeared(self.box, 'src/new.js', False, 'src/new.js.tmp.1')
+        self.looked('src/new.js', 'moved_to')
+        (fact,) = self.engine.facts.values()
+        self.assertEqual((fact['path'], fact['effect'], fact['certainty'], fact['pid']), ('src/new.js', 'created', 'confirmed', 10))
+
+    def test_the_snapshot_hook_reading_every_file_is_counted_not_listed(self):
+        self.engine.refresh(self.box)
+        self.engine.executed(self.box, {'pid': 30, 'ppid': 1, 'process_start_ns': '30', 'executable': '/usr/local/bin/node',
+                                        'argv': ['node', engine.OWN_HOOK]})
+        self.engine.executed(self.box, {'pid': 31, 'ppid': 30, 'process_start_ns': '31', 'executable': '/usr/bin/git', 'argv': ['git', 'add', '-A']})
+        read = {'kind': 'open', 'pathname': '/workspace/config/payment-keys.js', 'flags': 0, 'errno': 0, 'ppid': 30,
+                'timestamp_ns': str(time.time_ns()), 'sysno': 56}
+        self.engine.opened(self.box, {**read, 'pid': 31, 'process_start_ns': '31'})
+        self.assertEqual([fact for fact in self.engine.facts.values() if fact['kind'] == 'file'], [])
+        # Anything else named like the hook is not it, and its read is a fact.
+        self.engine.executed(self.box, {'pid': 40, 'ppid': 1, 'process_start_ns': '40', 'executable': '/usr/local/bin/node',
+                                        'argv': ['node', '/tmp/hook.mjs']})
+        self.engine.opened(self.box, {**read, 'pid': 40, 'ppid': 1, 'process_start_ns': '40'})
+        self.assertEqual([fact['pid'] for fact in self.engine.facts.values() if fact['kind'] == 'file'], [40])
+
+    def test_the_shell_of_a_tool_call_carries_the_call_in_its_own_text(self):
+        """Claude Code runs `bash -c "... eval '<command>'"`: a redirect is the shell's own write."""
+        self.engine.refresh(self.box)
+        self.engine.executed(self.box, {'pid': 50, 'ppid': 1, 'process_start_ns': '50', 'executable': '/bin/bash', 'argv': [
+            '/bin/bash', '-c', "source /home/node/snap.sh || true && eval 'export RAYTRACE_CALL_ID=toolu_01ABC\necho hi > src/app.js' < /dev/null"]})
+        self.assertEqual(self.box.processes[50]['call_id'], 'toolu_01ABC')
 
     def test_a_write_through_a_link_is_still_the_writers(self):
         os.symlink('app.js', Path(self.folder.name) / 'src/alias.js')
