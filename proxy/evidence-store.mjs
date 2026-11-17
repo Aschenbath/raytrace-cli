@@ -557,6 +557,10 @@ export function openEvidenceStore(file, { readOnly = false } = {}) {
       insertAttribution.run(randomUUID(), toolCallId, eventId, method, confidence,
         JSON.stringify({ method, score, window_start_ms: windowStartMs, window_end_ms: windowEndMs }), ATTRIBUTOR_VERSION, Date.now(),
         score ?? null, windowStartMs ?? null, windowEndMs ?? null);
+      // The process may have exited and the call been answered before the two
+      // were tied (a transcript that arrives after its commands ran): neither
+      // arrival will come again to set the check.
+      checkReported({ toolCallId });
       indexGuarded(() => indexCall(toolCallId));
       return true;
     },
