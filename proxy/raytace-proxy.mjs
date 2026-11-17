@@ -460,7 +460,8 @@ const server = createServer(async (req, res) => {
       return json(200, { id: box.id, name: box.name, ...(await sandboxes.activity(box.id, window)) });
     } catch { return json(503, { error: NO_VM }); }
   }
-  // The initial scan, restricted files and alerts are not kept for local sandboxes yet.
+  // The initial scan and alerts are not kept for local sandboxes yet. Their restricted and
+  // reported files are set from the CLI: raytrace sandbox files <name> (src/local-sandbox.mjs).
   if (/^\/raytace\/(sandboxes\/rtp-[a-f0-9]{32}(\/files)?|alerts(\?sandbox=rtp-[a-f0-9]{32})?|alerts\/seen)$/.test(req.url ?? '')) {
     if (req.method === 'GET' && req.url.startsWith('/raytace/alerts')) return json(200, { alerts: [] });
     return json(404, { error: 'Not available for local sandboxes yet. Destroy one with: raytrace sandbox destroy <name>' });

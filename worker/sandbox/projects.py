@@ -187,6 +187,24 @@ def lock(root, path, on):
     finally:
         os.close(at)
 
+def present(root, path):
+    """Whether a project path is a regular file, without following a link at any step."""
+    try:
+        at = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    except OSError:
+        return False
+    try:
+        parts = PurePosixPath(path).parts
+        for part in parts[:-1]:
+            below = os.open(part, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY, dir_fd=at)
+            os.close(at)
+            at = below
+        return bool(parts) and stat.S_ISREG(os.stat(parts[-1], dir_fd=at, follow_symlinks=False).st_mode)
+    except OSError:
+        return False
+    finally:
+        os.close(at)
+
 def guardrails(sid, state, restricted=None, watched=None, blocked=None):
     """Applies a sandbox's restricted files: the new list, or the stored one
     again. The Claude Code hook gets the list at once and refuses the edit
@@ -197,7 +215,8 @@ def guardrails(sid, state, restricted=None, watched=None, blocked=None):
     owner wants to hear of a read or a change: the hook reports an attempt on
     them and nothing is locked. `blocked` are the programs the hook refuses
     to start (None keeps the stored list). Returns {hook: the hook has the
-    list, read_only: the files locked}."""
+    list, read_only: the files locked, restricted and watched: the lists as
+    they now are, missing: listed paths that are not a file in the project}."""
     GUARDRAILS.mkdir(parents=True, exist_ok=True, mode=0o700)
     stored = GUARDRAILS / (sid+'.json')
     kept = json.loads(stored.read_text()) if stored.exists() else {}
@@ -217,7 +236,8 @@ def guardrails(sid, state, restricted=None, watched=None, blocked=None):
     stored.write_text(lists)
     if running and (restricted or before or watched or kept.get('watched') or blocked or kept.get('blocked')):
         write_as_root(sid, GUARDRAILS_IN_SANDBOX, lists.encode())
-    return {'hook': bool(running), 'read_only': read_only}
+    return {'hook': bool(running), 'read_only': read_only, 'restricted': restricted, 'watched': watched,
+            'missing': [path for path in [*restricted, *watched] if not present(root, path)]}
 
 def as_node(container, *command, data=None, check=True):
     """Runs a command in a sandbox as its agent user, never root."""

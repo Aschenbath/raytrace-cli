@@ -221,6 +221,13 @@ export async function stop(id, flags = {}) {
   const box = await call('POST', `/v1/sandboxes/${await pickId(id)}/stop`); say(`${box.id} stopped; its files are kept`);
 }
 
+export async function files(id, flags = {}) {
+  if (id && !flags.local && !local.isLocal(id)) {
+    throw new Error('File lists are set here for local sandboxes only. For a cloud sandbox, use Initial scan in the dashboard.');
+  }
+  return local.files(id, flags);
+}
+
 export async function destroy(id, flags) {
   if (flags.local || local.isLocal(id)) return local.destroy(id, flags, { ask, interactive });
   id = await pickId(id);

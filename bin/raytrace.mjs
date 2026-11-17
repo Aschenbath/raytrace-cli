@@ -48,6 +48,11 @@ Local sandboxes (your project stays on this machine):
   raytrace sandbox destroy <name> [--delete-logs | --keep-logs]
                                             asks whether to delete its captured logs too;
                                             kept logs move to ~/.raytrace/archive
+  raytrace sandbox files <name>             show the files the agent may not change (Restrict)
+                                            and the files whose every read is recorded (Report)
+  raytrace sandbox files <name> --restrict <path> | --report <path> | --clear <path>
+                                            change them; paths are from the project's root,
+                                            and each option can be repeated
   Recorded commands, files and connections: raytrace open, then Sandbox evidence.
   macOS and Linux; Windows is experimental. raytrace doctor shows what is missing.
 
@@ -170,6 +175,9 @@ if (command === 'sandbox') {
       'delete-logs': { type: 'boolean' },
       'keep-logs': { type: 'boolean' },
       'keep-traces': { type: 'boolean' },
+      restrict: { type: 'string', multiple: true },
+      report: { type: 'string', multiple: true },
+      clear: { type: 'string', multiple: true },
     } });
   } catch (error) { console.error(`${error.message}\n\nRun \`raytrace help\` for usage.`); process.exit(2); }
   const [sub, id] = parsed.positionals;
@@ -180,6 +188,7 @@ if (command === 'sandbox') {
     start: () => sandbox.start(id, parsed.values),
     stop: () => sandbox.stop(id, parsed.values),
     destroy: () => sandbox.destroy(id, parsed.values),
+    files: () => sandbox.files(id, parsed.values),
   }[sub];
   if (!action) { console.error(`Unknown sandbox command: ${sub ?? '(none)'}\n\n${HELP}`); process.exit(2); }
   try { await action(); process.exit(0); }
