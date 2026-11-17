@@ -194,6 +194,20 @@ test('reported_check records disagreement whichever side arrives first', () => w
   assert.equal(row.reported_check, 'exit_code_differs');
 }));
 
+test('a result with no code and no error agrees with an observed exit 0, and is left unchecked otherwise', () => {
+  withStore((store) => {
+    captureDemo(store, { reported: '1 passing' });
+    observeDemo(store);
+    assert.equal(store.divergence(['e1'])[0].reported_check, 'agrees');
+  });
+  withStore((store) => {
+    // Nothing reported and the sandbox saw exit 1: perhaps left running in the background. Not called a disagreement.
+    captureDemo(store, { reported: '1 passing' });
+    observeDemo(store, { exitCode: 1 });
+    assert.equal(store.divergence(['e1'])[0].reported_check, null);
+  });
+});
+
 test('attributionsForProcesses marks own, inherited and unattributed processes by pid + start time', () => withStore((store) => {
   captureDemo(store);
   observeDemo(store);

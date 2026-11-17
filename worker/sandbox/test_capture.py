@@ -387,6 +387,34 @@ class EveryProjectFile(unittest.TestCase):
                                         'argv': ['true', engine.TOOL_MARK, 'begin', 'Read', 'config/payment-keys.js'],
                                         'timestamp_ns': str(time.time_ns()), 'markers': {'RAYTRACE_CALL_ID': 'made_up'}})
         self.assertEqual(len(self.box.tools), 0)
+    def test_a_file_that_came_and_went_between_two_looks_is_a_line(self):
+        self.engine.refresh(self.box)
+        self.opened('src/scratch.txt', flags=engine.O_CREAT | 1)
+        self.assertEqual(self.looked('src/scratch.txt', 'create', 'modify', 'close_write', 'delete'),
+                         [('src/scratch.txt', 'created_and_deleted', 'project', 'call_10')])
+        self.assertNotIn('src/scratch.txt', self.box.guarded)
+        self.assertEqual(len(self.looked('src/scratch.txt', final=True)), 1)
+
+    def test_a_file_written_with_the_same_bytes_is_said_to_be_written(self):
+        self.engine.refresh(self.box)
+        self.opened('src/app.js')
+        self.write('src/app.js', 'one')   # what it already held
+        self.assertEqual(self.looked('src/app.js', 'modify', 'close_write'), [('src/app.js', 'rewritten', 'project', 'call_10')])
+        # Opened for writing and never written: still only "possible", at the last look.
+        self.engine.facts.clear()
+        self.opened('config/payment-keys.js', flags=1)
+        self.assertEqual(self.looked('config/payment-keys.js'), [])
+        self.assertEqual(self.looked('config/payment-keys.js', final=True), [('config/payment-keys.js', 'opened_for_writing', 'sensitive', 'call_10')])
+
+    def test_two_deletes_nobody_can_be_named_for_are_two_lines_when_minutes_apart(self):
+        self.engine.refresh(self.box)
+        body = {'path': 'src/app.js', 'effect': 'deleted', 'certainty': 'unattributed', 'basis': {}}
+        key = ('src/app.js', 'deleted', 'unattributed')
+        now = time.time_ns() // 60_000_000_000 * 60_000_000_000 + 1_000_000_000   # a second into a minute
+        self.engine.fact(self.box, 'file', key, {}, dict(body), now)
+        self.engine.fact(self.box, 'file', key, {}, dict(body), now + 1_000_000)
+        self.engine.fact(self.box, 'file', key, {}, dict(body), now + 600_000_000_000)
+        self.assertEqual(sorted(fact['count'] for fact in self.engine.facts.values()), [1, 2])
 
     def test_a_write_through_a_link_is_still_the_writers(self):
         os.symlink('app.js', Path(self.folder.name) / 'src/alias.js')

@@ -31,8 +31,18 @@ test('toolResultFacts reads exit code and wall time from the runner header only'
   // Still running: the wall time is how long Codex waited, not a run time.
   assert.deepEqual(toolResultFacts({ output: 'Wall time: 10.0 seconds\nProcess running with session ID 7\nOutput:\n' }), { exitCode: null, wallMs: null });
   // File contents that look like a header are not a header.
-  assert.deepEqual(toolResultFacts({ output: 'a file containing\nProcess exited with code 1' }), { exitCode: null, wallMs: null });
+  assert.deepEqual(toolResultFacts({ output: 'a file containing\nProcess exited with code 1' }), { exitCode: null, wallMs: null, impliedSuccess: true });
   // The older shell tool's JSON metadata.
   assert.deepEqual(toolResultFacts({ output: JSON.stringify({ output: 'ok', metadata: { exit_code: 2, duration_seconds: 0.25 } }) }), { exitCode: 2, wallMs: 250 });
   assert.deepEqual(toolResultFacts(undefined), { exitCode: null, wallMs: null });
+});
+
+test('toolResultFacts reads Claude Code\'s Bash result: a code only from an error, success only implied', async () => {
+  const { toolResultFacts } = await import('./tool-metadata.mjs');
+  assert.deepEqual(toolResultFacts({ output: 'Exit code 127\nbash: nope: command not found', is_error: true }), { exitCode: 127, wallMs: null });
+  // The same words printed by a command that worked are its output, not its code.
+  assert.deepEqual(toolResultFacts({ output: 'Exit code 3\nfrom a log file' }), { exitCode: null, wallMs: null, impliedSuccess: true });
+  assert.deepEqual(toolResultFacts({ output: '(Bash completed with no output)' }), { exitCode: null, wallMs: null, impliedSuccess: true });
+  // An error with no code (a refused tool, a timeout) says nothing either way.
+  assert.deepEqual(toolResultFacts({ output: '<tool_use_error>refused</tool_use_error>', is_error: true }), { exitCode: null, wallMs: null });
 });
