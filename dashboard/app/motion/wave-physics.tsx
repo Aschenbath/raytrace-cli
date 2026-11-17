@@ -93,10 +93,10 @@ export function WavePhysicsLoader({ theme = 'light' }: { theme?: 'light' | 'dark
           <motion.span
             key={i}
             className="rt-wave-bar"
-            style={{ height: reducedMotion ? '16px' : bar.heights[0], backgroundColor: reducedMotion ? (theme === 'dark' ? '#a5aab2' : '#666970') : bar.colors[0] }}
+            style={{ height: reducedMotion ? '16px' : bar.heights[0], backgroundColor: reducedMotion ? (theme === 'dark' ? '#a5ad9c' : '#646d5b') : bar.colors[0] }}
             animate={{
               height: reducedMotion ? '16px' : bar.heights,
-              backgroundColor: reducedMotion ? (theme === 'dark' ? '#a5aab2' : '#666970') : bar.colors,
+              backgroundColor: reducedMotion ? (theme === 'dark' ? '#a5ad9c' : '#646d5b') : bar.colors,
             }}
             transition={{
               duration: reducedMotion ? 0 : 4,
@@ -110,7 +110,7 @@ export function WavePhysicsLoader({ theme = 'light' }: { theme?: 'light' | 'dark
         <motion.span
           className="rt-wave-ball"
           initial={{ x: reducedMotion ? 140 : 0, y: reducedMotion ? -24 : -44 }}
-          style={{ bottom: 0, left: 0, transformOrigin: 'bottom center', background: theme === 'dark' ? '#fff' : '#18181b' }}
+          style={{ bottom: 0, left: 0, transformOrigin: 'bottom center', background: theme === 'dark' ? '#fbfdf9' : '#171915' }}
           animate={{
             x: reducedMotion ? 140 : ballX,
             y: reducedMotion ? -24 : ballY,

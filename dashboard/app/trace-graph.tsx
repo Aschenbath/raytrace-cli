@@ -122,9 +122,9 @@ export function TraceGraph({ trace, blocks, summaries, onSelectStep }: { trace: 
   return (
     <div className="graph-canvas">
       <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }} colorMode={theme}>
-        <Background color={theme === 'dark' ? '#30343a' : '#d5d8dc'} gap={24} />
+        <Background color={theme === 'dark' ? '#31362c' : '#d3dbcb'} gap={24} />
         <Controls showInteractive={false} />
-        <MiniMap pannable zoomable style={{ background: 'var(--deep)' }} maskColor={theme === 'dark' ? 'rgba(17,19,21,0.75)' : 'rgba(255,255,255,0.75)'} nodeColor={theme === 'dark' ? '#30343a' : '#d5d8dc'} />
+        <MiniMap pannable zoomable style={{ background: 'var(--deep)' }} maskColor={theme === 'dark' ? 'rgba(17,19,21,0.75)' : 'rgba(255,255,255,0.75)'} nodeColor={theme === 'dark' ? '#31362c' : '#d3dbcb'} />
       </ReactFlow>
     </div>
   );
