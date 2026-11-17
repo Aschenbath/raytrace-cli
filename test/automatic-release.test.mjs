@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { prepareRelease, releaseBump } from '../.github/scripts/prepare-npm-release.mjs';
+import { nextVersion, prepareRelease, releaseBump } from '../.github/scripts/prepare-npm-release.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'raytrace-release-'));
@@ -35,41 +35,75 @@ test('release labels default to patch and require an explicit unambiguous overri
   assert.throws(() => releaseBump(['release:typo']), /at most one/);
 });
 
-test('merged PR creates one atomic version commit and annotated tag; retry reuses them', t => {
+test('a merged PR is released as a tag on top of main, and main itself is not pushed to', t => {
   const f = fixture(t);
+  const main = f.git('rev-parse', 'origin/main');
   assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 12, bump: 'patch' }), { tag: 'v0.13.1', reused: false });
-  const commit = f.git('rev-parse', 'HEAD');
-  assert.match(f.git('log', '-1', '--format=%B'), /Release-PR: #12/);
-  assert.equal(f.git('rev-parse', 'v0.13.1^{}'), commit);
-  assert.equal(f.git('rev-parse', 'origin/main'), commit);
-  assert.equal(JSON.parse(readFileSync(join(f.cwd, 'package-lock.json'))).version, '0.13.1');
+  const commit = f.gitAt(f.remote, 'rev-parse', 'v0.13.1^{}');
+  assert.match(f.gitAt(f.remote, 'log', '-1', '--format=%B', commit), /Release-PR: #12/);
+  assert.equal(f.gitAt(f.remote, 'rev-parse', `${commit}^`), main, 'the version commit sits directly on main');
+  assert.equal(f.gitAt(f.remote, 'rev-parse', 'main'), main, 'main is untouched');
+  assert.equal(JSON.parse(f.gitAt(f.remote, 'show', 'v0.13.1:package.json')).version, '0.13.1');
+  assert.equal(JSON.parse(f.gitAt(f.remote, 'show', 'v0.13.1:package-lock.json')).version, '0.13.1');
+  assert.equal(JSON.parse(f.gitAt(f.remote, 'show', 'main:package.json')).version, '0.13.0');
+
+  // A rerun for the same PR reuses its release.
   assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 12, bump: 'patch' }), { tag: 'v0.13.1', reused: true });
-  assert.equal(f.git('rev-parse', 'HEAD'), commit);
+  assert.equal(f.gitAt(f.remote, 'rev-parse', 'v0.13.1^{}'), commit);
+
+  // Later releases count from the highest tag, though package.json on main still says 0.13.0.
   assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 123, bump: 'minor' }), { tag: 'v0.14.0', reused: false });
-  assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 124, bump: 'major' }), { tag: 'v1.0.0', reused: false });
+  assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 124, bump: 'patch' }), { tag: 'v0.14.1', reused: false });
+  assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 125, bump: 'major' }), { tag: 'v1.0.0', reused: false });
+  assert.equal(f.gitAt(f.remote, 'rev-parse', 'v1.0.0^{}^'), main, 'each release starts from main, not from the release before it');
+  assert.equal(f.gitAt(f.remote, 'rev-parse', 'main'), main);
 });
 
-test('a concurrent main update is preserved and retried without leaving a partial release', t => {
+test('a release carries what has merged into main since', t => {
   const f = fixture(t);
+  prepareRelease({ cwd: f.cwd, prNumber: 1, bump: 'patch' });
   const other = join(f.root, 'other');
   f.gitAt(f.root, 'clone', '-b', 'main', f.remote, other);
   f.gitAt(other, 'config', 'user.name', 'Other merger');
   f.gitAt(other, 'config', 'user.email', 'other@example.invalid');
-  // The pre-push hook simulates another PR landing after our version commit.
-  // Export paths through the environment to avoid embedding shell-escaped paths.
+  writeFileSync(join(other, 'README.md'), 'Initial\nMerged later\n');
+  f.gitAt(other, 'commit', '-am', 'Another PR');
+  f.gitAt(other, 'push', 'origin', 'main');
+  assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 2, bump: 'patch' }), { tag: 'v0.13.2', reused: false });
+  assert.match(f.gitAt(f.remote, 'show', 'v0.13.2:README.md'), /Merged later/);
+});
+
+test('a version bumped on main by hand is the floor', t => {
+  const f = fixture(t);
+  const pkg = { name: '@raytrace-cli/cli', version: '0.20.0' };
+  writeFileSync(join(f.cwd, 'package.json'), JSON.stringify(pkg, null, 2));
+  writeFileSync(join(f.cwd, 'package-lock.json'), JSON.stringify({ ...pkg, lockfileVersion: 3, packages: { '': pkg } }, null, 2));
+  f.git('commit', '-am', 'Bump by hand');
+  f.git('push', 'origin', 'main');
+  assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 7, bump: 'patch' }), { tag: 'v0.20.1', reused: false });
+});
+
+test('a version another release took first is passed over', t => {
+  const f = fixture(t);
+  // The pre-push hook stands in for another release landing v0.13.1 while ours was being made.
   const hook = join(f.cwd, '.git/hooks/pre-push');
-  writeFileSync(hook, '#!/bin/sh\nif [ ! -f "$RAYTRACE_RACE_MARKER" ]; then\n  touch "$RAYTRACE_RACE_MARKER"\n  echo Concurrent >> "$RAYTRACE_OTHER_REPO/README.md"\n  git -C "$RAYTRACE_OTHER_REPO" add README.md\n  git -C "$RAYTRACE_OTHER_REPO" commit -m "Other PR"\n  git -C "$RAYTRACE_OTHER_REPO" push origin main\nfi\n', { mode: 0o755 });
-  const oldOther = process.env.RAYTRACE_OTHER_REPO;
-  const oldMarker = process.env.RAYTRACE_RACE_MARKER;
-  process.env.RAYTRACE_OTHER_REPO = other;
+  writeFileSync(hook, '#!/bin/sh\nif [ ! -f "$RAYTRACE_RACE_MARKER" ]; then\n  touch "$RAYTRACE_RACE_MARKER"\n  git --git-dir="$RAYTRACE_REMOTE" tag -a v0.13.1 -m taken main\nfi\n', { mode: 0o755 });
+  const old = [process.env.RAYTRACE_REMOTE, process.env.RAYTRACE_RACE_MARKER];
+  process.env.RAYTRACE_REMOTE = f.remote;
   process.env.RAYTRACE_RACE_MARKER = join(f.root, 'raced');
   try {
-    assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 15, bump: 'patch' }), { tag: 'v0.13.1', reused: false });
-    assert.match(readFileSync(join(f.cwd, 'README.md'), 'utf8'), /Concurrent/);
-    assert.equal(f.git('log', '--format=%H', '--grep=^Release-PR: #15$').split('\n').length, 1);
-    assert.equal(f.git('rev-parse', 'v0.13.1^{}'), f.git('rev-parse', 'origin/main'));
+    assert.deepEqual(prepareRelease({ cwd: f.cwd, prNumber: 15, bump: 'patch' }), { tag: 'v0.13.2', reused: false });
+    assert.match(f.gitAt(f.remote, 'log', '-1', '--format=%B', 'v0.13.2^{}'), /Release-PR: #15/);
+    assert.doesNotMatch(f.gitAt(f.remote, 'log', '-1', '--format=%B', 'v0.13.1^{}'), /Release-PR/);
   } finally {
-    if (oldOther === undefined) delete process.env.RAYTRACE_OTHER_REPO; else process.env.RAYTRACE_OTHER_REPO = oldOther;
-    if (oldMarker === undefined) delete process.env.RAYTRACE_RACE_MARKER; else process.env.RAYTRACE_RACE_MARKER = oldMarker;
+    for (const [index, name] of ['RAYTRACE_REMOTE', 'RAYTRACE_RACE_MARKER'].entries()) {
+      if (old[index] === undefined) delete process.env[name]; else process.env[name] = old[index];
+    }
   }
+});
+
+test('the next version', () => {
+  assert.equal(nextVersion('0.13.9', 'patch'), '0.13.10');
+  assert.equal(nextVersion('0.13.9', 'minor'), '0.14.0');
+  assert.equal(nextVersion('0.13.9', 'major'), '1.0.0');
 });
