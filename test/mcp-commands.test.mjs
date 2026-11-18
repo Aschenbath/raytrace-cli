@@ -52,6 +52,8 @@ test('the command tools are listed with accurate hints, and the instructions sen
   const tools = (await rpc('tools/list', {})).result.tools, byName = (name) => tools.find((x) => x.name === name);
   assert.equal(tools.length, 11);
   assert.equal(byName('run_command').annotations.readOnlyHint, false);
+  // A shell command can delete or overwrite anything in the sandbox: clients that ask before destructive tools must ask here.
+  assert.equal(byName('run_command').annotations.destructiveHint, true);
   assert.equal(byName('get_command_result').annotations.readOnlyHint, true);
   assert.equal(byName('cancel_command').annotations.readOnlyHint, false);
   for (const name of ['run_command', 'get_command_result']) assert.match(byName(name).description, /untrusted/i, name);
