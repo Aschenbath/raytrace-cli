@@ -1,6 +1,9 @@
 # The pip wheels: built once, then installed on each platform they are for.
-# A release uploads those wheels to PyPI with trusted publishing (no token).
-# PyPI checks the workflow filename, which is pip.yml, and the environment pypi.
+# Run on its own (a dispatch with a tag, or a tag push), it also uploads them
+# to PyPI with trusted publishing (no token), as the pip.yml publisher with
+# environment pypi. Called from npm-publish.yml it only builds and tests: that
+# workflow uploads the `wheels` artifact itself, because PyPI checks a wheel's
+# attestation against the top-level workflow, which a called one is not.
 name: pip wheels
 
 on:
@@ -10,11 +13,6 @@ on:
         description: Release tag to build, such as v0.17.4. Empty checks out the caller.
         required: false
         type: string
-      publish:
-        description: Upload the built wheels to PyPI.
-        required: false
-        type: boolean
-        default: false
   workflow_dispatch:
     inputs:
       tag:
@@ -86,12 +84,13 @@ jobs:
           PY
       - run: raytrace doctor || true
 
-  # Trusted publishing. The OIDC token names this file (pip.yml) and the
-  # environment below. pypi.org's publisher must use those two values.
+  # Trusted publishing, only when this file is the top-level workflow: the
+  # token and each wheel's attestation then both name pip.yml, with the
+  # environment below. When called, github.workflow_ref names the caller.
   publish:
     name: Publish to PyPI
     needs: install
-    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name != 'pull_request' && (inputs.publish || inputs.tag || startsWith(github.ref, 'refs/tags/v'))
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name != 'pull_request' && contains(github.workflow_ref, '/.github/workflows/pip.yml@') && (inputs.tag || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
