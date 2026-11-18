@@ -151,12 +151,14 @@ jobs:
         if: steps.package.outputs.exists == 'false'
         run: npm publish --access public
 
-  # Build, install-test, and upload the wheels. PyPI trusted publishing reads
-  # the called workflow's filename, pip.yml, and its environment, pypi.
+  # Build and install-test the wheels on every platform (pip.yml). Called from
+  # here, pip.yml does not upload them; the pypi job below does.
   wheels:
-    name: Publish PyPI wheels
+    name: Build PyPI wheels
     needs: [prepare-release, publish]
     if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success'
+    # Not used here, but GitHub refuses to start the run unless the caller
+    # grants what every job in pip.yml asks for, its skipped publish included.
     permissions:
       contents: read
       id-token: write
@@ -164,15 +166,78 @@ jobs:
       deployments: write
     uses: ./.github/workflows/pip.yml
     with:
-      publish: true
       tag: ${{ github.event.release.tag_name || inputs.tag }}
+
+  # Upload the wheels from this workflow, not from pip.yml: PyPI matches the
+  # trusted publisher on the workflow that runs the upload, but checks each
+  # wheel's attestation against the top-level workflow. Both are this file
+  # only when the upload runs here. pypi.org's publisher for this job:
+  # workflow npm-publish.yml, environment pypi.
+  pypi:
+    name: Publish to PyPI
+    needs: wheels
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && needs.wheels.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: pypi
+      url: https://pypi.org/project/raytrace-cli/
+    permissions:
+      contents: read
+      id-token: write
+      deployments: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Download the wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+      - name: Require this release's six wheels
+        id: wheels
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing to upload non-stable version ${version}."
+            exit 1
+          fi
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 6 ]; then
+            echo "Expected 6 wheels for ${version}, found ${#wheels[@]}."
+            exit 1
+          fi
+          for wheel in "${wheels[@]}"; do
+            case "$(basename "$wheel")" in
+              raytrace_cli-"${version}"-*) ;;
+              *) echo "Unexpected wheel $(basename "$wheel") for ${version}."; exit 1 ;;
+            esac
+          done
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/raytrace-cli/${version}/json")"
+          if [ "$code" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "raytrace-cli ${version} is already on PyPI; skipped uploading." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish wheels to PyPI
+        if: steps.wheels.outputs.exists != 'true'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+          skip-existing: true
+          attestations: true
 
   # After npm and PyPI for this version are both published. The script is
   # taken from this workflow's revision, and server.json from the release tag.
   publish-registry:
     name: Publish to MCP Registry
-    needs: [publish, wheels]
-    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success' && needs.wheels.result == 'success'
+    needs: [publish, pypi]
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success' && needs.pypi.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
