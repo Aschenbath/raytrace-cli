@@ -1,0 +1,45 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Godcreatebugs/raytrace",
+  "title": "RayTrace",
+  "description": "Local gVisor sandbox for coding agents that records what they actually ran.",
+  "repository": {
+    "url": "https://github.com/Godcreatebugs/raytrace-cli",
+    "source": "github",
+    "id": "1407790196"
+  },
+  "version": "0.13.1",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "@raytrace-cli/cli",
+      "version": "0.13.1",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    },
+    {
+      "registryType": "pypi",
+      "identifier": "raytrace-cli",
+      "version": "0.13.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ],
+  "websiteUrl": "https://www.raytracer.si"
+}

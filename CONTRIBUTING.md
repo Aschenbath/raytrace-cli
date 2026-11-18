@@ -145,9 +145,25 @@ The npm trusted publisher must specify owner `Godcreatebugs`, repository
 `npm publish`. A newly configured publisher must complete its first actual
 publish within two days; otherwise recreate the expired connection on npm.
 
+The same dispatched run then publishes the [MCP Registry](https://registry.modelcontextprotocol.io)
+entry. No registry secret is required: the job uses GitHub OIDC. It rewrites
+`server.json`'s version to the release (main keeps `package.json`'s version,
+as it does for npm) and runs `mcp-publisher`. The server name is
+`io.github.Godcreatebugs/raytrace`. npm is verified from `mcpName` in
+`package.json`; PyPI is verified from the `mcp-name:` line in
+`python/README.md`, which is the wheel's description.
+
+That registry version is kept as first published, so the job publishes only
+when both packages of this version are already up. npm has just been
+published; PyPI is still the manual upload below. Until the wheel is on PyPI
+the registry job fails on purpose and nothing is listed for that version.
+Upload the wheels, then re-run **Publish npm package** with the same tag (npm
+is skipped) or re-run the failed registry job. Tags from before this metadata
+(`v0.17.3` and earlier) cannot be listed: those npm releases have no `mcpName`.
+
 For a retry, run **Publish npm package** from the Actions tab and enter the
 existing release tag. Already published versions are skipped, including
-`v0.13.0`; registry errors fail the job instead of attempting a publish.
+`v0.13.0`; npm registry errors fail the job instead of attempting a publish.
 Prereleases are excluded from automatic publishing. Already published Releases
 are not triggered retroactively. To retry a failed automatic release, rerun
 its merged-PR workflow; to retry publishing an existing tag, use the manual
@@ -156,7 +172,7 @@ because GitHub does not trigger tag workflows for GITHUB_TOKEN pushes.
 PyPI uploading remains manual. Merging the automation PR itself produces a
 patch release unless that PR has `release:skip`.
 
-Then build the same version's pip wheels and upload them:
+Build the same version's pip wheels and upload them before the registry re-run:
 
 ```sh
 python3 python/build_wheels.py    # all six platforms, into python/dist/

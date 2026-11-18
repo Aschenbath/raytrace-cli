@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing stable release tag to publish (for example v0.13.1)'
+        description: 'Existing stable release tag to publish to npm and the MCP Registry (for example v0.17.4). npm is skipped when that version is already published.'
         required: true
         type: string
 
@@ -145,3 +145,75 @@ jobs:
       - name: Publish to npm
         if: steps.package.outputs.exists == 'false'
         run: npm publish --access public
+
+  # Runs only after npm publish succeeded. The script is taken from this
+  # workflow's revision, and server.json from the release tag: main does not
+  # move its version, so the tag still has the old server.json version until
+  # this job rewrites it. A registry version cannot be edited later, and
+  # server.json lists PyPI, so the job stops until that version's wheel is
+  # uploaded rather than listing npm on its own.
+  publish-registry:
+    name: Publish to MCP Registry
+    needs: publish
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # Pinned on purpose. The registry's publishing guide says not to follow
+      # releases/latest. v1.8.9 is signed by .github/workflows/release.yml.
+      MCP_PUBLISHER_VERSION: v1.8.9
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - name: Checkout this workflow's publisher script
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+          path: publisher
+
+      - name: Checkout the release tag
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+          path: release
+
+      - name: Sync server.json and require both packages to be published
+        working-directory: release
+        run: node "$GITHUB_WORKSPACE/publisher/.github/scripts/sync-mcp-server-json.mjs" --check-published
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Validate server.json
+        working-directory: release
+        run: "$GITHUB_WORKSPACE/mcp-publisher validate"
+
+      - name: Authenticate to MCP Registry
+        working-directory: release
+        run: "$GITHUB_WORKSPACE/mcp-publisher login github-oidc"
+
+      - name: Publish server to MCP Registry
+        working-directory: release
+        run: "$GITHUB_WORKSPACE/mcp-publisher publish"
