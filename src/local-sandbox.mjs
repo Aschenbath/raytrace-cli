@@ -180,17 +180,20 @@ export async function preflight(flags, { confirm, interactive }) {
   lima = (await downloadLima(say)).binary;
 }
 
+export const missingLocalSandboxMessage = (ref) => `No local sandbox named "${ref}". List them with: raytrace sandbox list --local`;
+export const ambiguousLocalSandboxMessage = () => 'More than one local sandbox. Name one with: raytrace sandbox list --local';
+
 /** A local sandbox's id, from its id or name; with neither, the only one there is. */
 function pickId(ref) {
   const boxes = registry();
   if (ref) {
     const id = boxes[ref] ? ref : byName(boxes, ref);
-    if (!id) throw new Error(`No local sandbox named ${ref}: raytrace sandbox list --local`);
+    if (!id) throw new Error(missingLocalSandboxMessage(ref));
     return id;
   }
   const ids = Object.keys(boxes);
   if (ids.length === 1) return ids[0];
-  throw new Error(ids.length ? 'More than one local sandbox; name one (raytrace sandbox list --local).'
+  throw new Error(ids.length ? ambiguousLocalSandboxMessage()
     : 'No local sandboxes yet: raytrace sandbox create --local');
 }
 
