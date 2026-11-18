@@ -93,16 +93,16 @@ npm install -g @raytrace-cli/cli
 cd your-project                              # any Git repository
 raytrace sandbox create --local              # first time: sets up the VM, a few minutes
 raytrace connect your-project --claude       # a terminal in it, with Claude Code running
-# open the local dashboard at http://127.0.0.1:8797
+raytrace open                               # run in another terminal to open the dashboard
 ```
 
 - The sandbox is named after the folder. Use `--name my-box` to choose the name.
 - Use `--codex` instead of `--claude` to start Codex, or leave both off for a
   plain shell where you run `claude` or `codex` yourself.
 - `connect` prints a link to the dashboard showing only this sandbox's prompts.
-  The full local dashboard is at `http://127.0.0.1:8797` — open that in your
-  browser. If you set `RAYTACE_PORT` in `~/.raytrace/config.env`, the
-  dashboard is on that port instead.
+  Run `raytrace open` to open the full local dashboard and sign your browser in.
+  The dashboard is at `http://127.0.0.1:8797` by default. If you set
+  `RAYTACE_PORT` in `~/.raytrace/config.env`, the dashboard is on that port instead.
 
 The npm package needs **Node.js 22.13 or newer** (`node --version`) on macOS or
 Linux. The PyPI package installs the same CLI with its own Node.js, so you
@@ -130,6 +130,7 @@ then say "create a local sandbox and connect this repo".
 ```sh
 raytrace sandbox list --local         # your local sandboxes
 raytrace connect my-box --claude      # back in; the sandbox keeps running when you leave
+raytrace open                         # open the local dashboard and sign in
 raytrace sandbox stop my-box          # stop it; its files are kept
 raytrace sandbox start my-box
 raytrace sandbox destroy my-box       # asks whether to delete its captured logs too
@@ -189,9 +190,11 @@ page yet. Its commands, file changes and network connections are recorded.
 
 ## What a recorded session shows
 
-Cloud sessions are at [app.raytracer.si](https://app.raytracer.si). The local
-dashboard is at `http://127.0.0.1:8797` — open that in your browser. Every
-page is about one prompt, and they link to each other.
+Cloud sessions are at [app.raytracer.si](https://app.raytracer.si). For local
+sessions, run `raytrace open` to open the dashboard and sign in. If RayTrace
+is stopped, run `raytrace start` first. The local dashboard is at
+`http://127.0.0.1:8797` by default. Each prompt has its own page, with links
+between pages.
 
 The dashboard has two layers. **Tool calls** are what the agent reported: the
 path from your prompt to the answer, with the command, what the agent says came
