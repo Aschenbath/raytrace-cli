@@ -1,5 +1,7 @@
 # RayTrace
 
+<!-- mcp-name: io.github.Godcreatebugs/raytrace -->
+
 See what your coding agent did: traces, tool calls, cost and step-by-step evidence for Claude Code and Codex, and sandboxes (cloud or local) to run them in.
 
 This is the RayTrace CLI from npm (`@raytrace-cli/cli`), packaged for pip with its own Node.js, so you don't need Node installed. The command is `raytrace`.

@@ -4,6 +4,9 @@
 your editor once, and your agent can create, open, stop and destroy sandboxes
 for you. There is nothing to install first: `npx` downloads the CLI on first use.
 
+Its name in the [MCP Registry](https://registry.modelcontextprotocol.io) is
+`io.github.Godcreatebugs/raytrace`.
+
 A shorter pointer is in the [README](../README.md#set-up-in-your-editor-mcp).
 Local sandboxes need no account; creating one from the CLI is in
 [Create a local sandbox](../README.md#create-a-local-sandbox).

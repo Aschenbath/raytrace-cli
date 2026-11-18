@@ -143,7 +143,14 @@ def build(platform, package, version, readme, out_dir):
         readme,
     ])
     wheel = f'Wheel-Version: 1.0\nGenerator: raytrace build_wheels.py\nRoot-Is-Purelib: false\nTag: {tag}\n'
-    entry_points = '[console_scripts]\nraytrace = raytrace.__main__:main\n'
+    # `raytrace` is the command in the docs. `raytrace-cli` matches the PyPI
+    # project name, so `uvx raytrace-cli mcp` starts the same server. That is
+    # how an MCP Registry client runs a PyPI package.
+    entry_points = (
+        '[console_scripts]\n'
+        'raytrace = raytrace.__main__:main\n'
+        'raytrace-cli = raytrace.__main__:main\n'
+    )
     with open(os.path.join(ROOT, 'LICENSE'), 'rb') as f:
         license_text = f.read()
     entries += [
