@@ -1,10 +1,26 @@
 # The pip wheels: built once, then installed on each platform they are for.
-# Publishing stays manual: download the "wheels" artifact, then
-#   twine upload raytrace_cli-*.whl
+# A release uploads those wheels to PyPI with trusted publishing (no token).
+# PyPI checks the workflow filename, which is pip.yml, and the environment pypi.
 name: pip wheels
 
 on:
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to build, such as v0.17.4. Empty checks out the caller.
+        required: false
+        type: string
+      publish:
+        description: Upload the built wheels to PyPI.
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and upload, such as v0.17.4. Empty builds the selected branch and does not upload.
+        required: false
+        type: string
   push:
     tags: ['v*']
   pull_request:
@@ -15,6 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        if: ${{ !inputs.tag }}
+      - uses: actions/checkout@v4
+        if: ${{ inputs.tag }}
+        with:
+          ref: ${{ inputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -64,3 +85,65 @@ jobs:
           print(len(tools), 'tools'); assert len(tools) > 5
           PY
       - run: raytrace doctor || true
+
+  # Trusted publishing. The OIDC token names this file (pip.yml) and the
+  # environment below. pypi.org's publisher must use those two values.
+  publish:
+    name: Publish to PyPI
+    needs: install
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name != 'pull_request' && (inputs.publish || inputs.tag || startsWith(github.ref, 'refs/tags/v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: pypi
+      url: https://pypi.org/project/raytrace-cli/
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      deployments: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - name: Download the wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+
+      - name: Require this release's six wheels
+        id: wheels
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing to upload non-stable version ${version}."
+            exit 1
+          fi
+          shopt -s nullglob
+          wheels=(dist/*.whl)
+          if [ "${#wheels[@]}" -ne 6 ]; then
+            echo "Expected 6 wheels for ${version}, found ${#wheels[@]}."
+            exit 1
+          fi
+          for wheel in "${wheels[@]}"; do
+            case "$(basename "$wheel")" in
+              raytrace_cli-"${version}"-*) ;;
+              *) echo "Unexpected wheel $(basename "$wheel") for ${version}."; exit 1 ;;
+            esac
+          done
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/raytrace-cli/${version}/json")"
+          if [ "$code" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "raytrace-cli ${version} is already on PyPI; skipped uploading." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish wheels to PyPI
+        if: steps.wheels.outputs.exists != 'true'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+          skip-existing: true
+          attestations: true

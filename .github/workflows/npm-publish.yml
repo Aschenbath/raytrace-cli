@@ -64,12 +64,11 @@ jobs:
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" --verify-tag --title "RayTrace CLI $RELEASE_TAG" --generate-notes
           fi
-          # GITHUB_TOKEN pushes do not trigger tag workflows. Dispatch this
-          # explicitly; the wheels are built for download, not uploaded to PyPI.
-          gh workflow run pip.yml --ref "$RELEASE_TAG"
           # npm's trusted publishing refuses a run started by a pull request
           # event (404 on upload) and accepts a dispatched one, so the publish
           # is a second run of this workflow rather than the next job of this one.
+          # That run also builds the wheels, uploads them to PyPI, and lists the
+          # MCP server. A tag push from GITHUB_TOKEN would not start pip.yml.
           gh workflow run npm-publish.yml --ref main -f tag="$RELEASE_TAG"
 
   publish:
@@ -132,6 +131,12 @@ jobs:
         if: steps.package.outputs.exists == 'false'
         run: npm ci
 
+      # The release tag bumps package.json and leaves server.json at main's
+      # version. Align them before the tests, which read both files.
+      - name: Point server.json at this release
+        if: steps.package.outputs.exists == 'false'
+        run: node .github/scripts/sync-mcp-server-json.mjs
+
       - name: Typecheck
         if: steps.package.outputs.exists == 'false'
         run: npm run typecheck
@@ -146,16 +151,28 @@ jobs:
         if: steps.package.outputs.exists == 'false'
         run: npm publish --access public
 
-  # Runs only after npm publish succeeded. The script is taken from this
-  # workflow's revision, and server.json from the release tag: main does not
-  # move its version, so the tag still has the old server.json version until
-  # this job rewrites it. A registry version cannot be edited later, and
-  # server.json lists PyPI, so the job stops until that version's wheel is
-  # uploaded rather than listing npm on its own.
+  # Build, install-test, and upload the wheels. PyPI trusted publishing reads
+  # the called workflow's filename, pip.yml, and its environment, pypi.
+  wheels:
+    name: Publish PyPI wheels
+    needs: [prepare-release, publish]
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success'
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      deployments: write
+    uses: ./.github/workflows/pip.yml
+    with:
+      publish: true
+      tag: ${{ github.event.release.tag_name || inputs.tag }}
+
+  # After npm and PyPI for this version are both published. The script is
+  # taken from this workflow's revision, and server.json from the release tag.
   publish-registry:
     name: Publish to MCP Registry
-    needs: publish
-    if: github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success'
+    needs: [publish, wheels]
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && needs.publish.result == 'success' && needs.wheels.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -185,10 +202,25 @@ jobs:
         working-directory: release
         run: node "$GITHUB_WORKSPACE/publisher/.github/scripts/sync-mcp-server-json.mjs" --check-published
 
+      - name: See if this version is already listed
+        id: listed
+        working-directory: release
+        run: |
+          version="$(node --input-type=module -e 'import {readFileSync} from "node:fs"; process.stdout.write(JSON.parse(readFileSync("server.json","utf8")).version)')"
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://registry.modelcontextprotocol.io/v0.1/servers/io.github.Godcreatebugs%2Fraytrace/versions/${version}")"
+          if [ "$code" = "200" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "io.github.Godcreatebugs/raytrace ${version} is already in the MCP Registry." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install cosign
+        if: steps.listed.outputs.already != 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
       - name: Download and verify mcp-publisher
+        if: steps.listed.outputs.already != 'true'
         run: |
           set -euo pipefail
           os="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -207,13 +239,16 @@ jobs:
           rm -f "$archive" "$archive.sigstore.json"
 
       - name: Validate server.json
+        if: steps.listed.outputs.already != 'true'
         working-directory: release
         run: "$GITHUB_WORKSPACE/mcp-publisher validate"
 
       - name: Authenticate to MCP Registry
+        if: steps.listed.outputs.already != 'true'
         working-directory: release
         run: "$GITHUB_WORKSPACE/mcp-publisher login github-oidc"
 
       - name: Publish server to MCP Registry
+        if: steps.listed.outputs.already != 'true'
         working-directory: release
         run: "$GITHUB_WORKSPACE/mcp-publisher publish"

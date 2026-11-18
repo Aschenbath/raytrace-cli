@@ -8,22 +8,27 @@ const server = JSON.parse(readFileSync(new URL('../server.json', import.meta.url
 const readme = readFileSync(new URL('../python/README.md', import.meta.url), 'utf8');
 const wheels = readFileSync(new URL('../python/build_wheels.py', import.meta.url), 'utf8');
 
-test('server.json matches the package the registry will verify', () => {
+test('server.json describes the package the registry verifies', () => {
   assert.equal(pkg.mcpName, SERVER_NAME);
   assert.equal(server.name, SERVER_NAME);
-  assert.equal(server.version, pkg.version);
-  assert.deepEqual(syncServerJson(server, pkg), server);
-  assert.equal(server.description.length <= 100, true);
+  const before = structuredClone(server);
+  const synced = syncServerJson(server, pkg);
+  assert.deepEqual(server, before);
+  assert.equal(synced.version, pkg.version);
+  assert.deepEqual(synced.packages.map((entry) => entry.version), [pkg.version, pkg.version]);
+  assert.equal(synced.description.length <= 100, true);
   assert.equal(readmeHasMcpName(readme), true);
   assert.match(wheels, /raytrace = raytrace\.__main__:main/);
   assert.match(wheels, /raytrace-cli = raytrace\.__main__:main/);
 });
 
 test('publishing rewrites every version to the release and leaves the source alone', () => {
-  const updated = syncServerJson(server, { ...pkg, version: '9.9.9' });
+  const before = structuredClone(server);
+  const released = { ...pkg, version: '9.9.9' };
+  const updated = syncServerJson(server, released);
   assert.equal(updated.version, '9.9.9');
   assert.deepEqual(updated.packages.map((entry) => entry.version), ['9.9.9', '9.9.9']);
-  assert.equal(server.version, pkg.version);
+  assert.deepEqual(server, before);
   assert.equal(updated.packages[0].packageArguments[0].value, 'mcp');
   assert.equal(updated.packages[1].packageArguments[0].value, 'mcp');
 });

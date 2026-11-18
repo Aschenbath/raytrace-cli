@@ -96,13 +96,13 @@ export async function assertPackagesPublished(version) {
   }
   let pypi;
   try {
-    pypi = await fetchJson(pypiMetadataUrl(version), 2);
+    pypi = await fetchJson(pypiMetadataUrl(version), 8);
   } catch (error) {
     throw new Error([
       `raytrace-cli ${version} is not on PyPI yet (${error.message}), so ${SERVER_NAME} ${version} was not published.`,
-      'server.json lists the PyPI package, and a registry version cannot be edited after it is published.',
-      'Upload this version\'s wheels (twine upload, or the pip wheels artifact), then re-run this job.',
-      'No registry secret is required.',
+      'The PyPI job uploads that version before this step.',
+      'Re-run Publish npm package with this tag once the PyPI trusted publisher is saved.',
+      'No PyPI token and no registry secret are required.',
     ].join(' '), { cause: error });
   }
   const description = pypi?.info?.description ?? '';

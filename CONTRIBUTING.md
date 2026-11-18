@@ -145,47 +145,43 @@ The npm trusted publisher must specify owner `Godcreatebugs`, repository
 `npm publish`. A newly configured publisher must complete its first actual
 publish within two days; otherwise recreate the expired connection on npm.
 
-The same dispatched run then publishes the [MCP Registry](https://registry.modelcontextprotocol.io)
-entry. No registry secret is required: the job uses GitHub OIDC. It rewrites
-`server.json`'s version to the release (main keeps `package.json`'s version,
-as it does for npm) and runs `mcp-publisher`. The server name is
-`io.github.Godcreatebugs/raytrace`. npm is verified from `mcpName` in
-`package.json`; PyPI is verified from the `mcp-name:` line in
-`python/README.md`, which is the wheel's description.
+The same dispatched run builds the pip wheels, installs them on Linux, macOS
+and Windows, and uploads them to PyPI. PyPI trusted publishing uses GitHub
+OIDC, so there is no PyPI token. The upload job is in `pip.yml` and uses the
+`pypi` environment. On pypi.org, add a GitHub trusted publisher for project
+`raytrace-cli` with owner `Godcreatebugs`, repository `raytrace-cli`, workflow
+`pip.yml`, and environment `pypi`. Do that before the first upload. Leave the
+GitHub `pypi` environment without required reviewers so a release does not
+wait for a click.
 
-That registry version is kept as first published, so the job publishes only
-when both packages of this version are already up. npm has just been
-published; PyPI is still the manual upload below. Until the wheel is on PyPI
-the registry job fails on purpose and nothing is listed for that version.
-Upload the wheels, then re-run **Publish npm package** with the same tag (npm
-is skipped) or re-run the failed registry job. Tags from before this metadata
-(`v0.17.3` and earlier) cannot be listed: those npm releases have no `mcpName`.
+After npm and PyPI for that version are both up, the run publishes the
+[MCP Registry](https://registry.modelcontextprotocol.io) entry. No registry
+secret: the job uses GitHub OIDC. It rewrites `server.json`'s version to the
+release (main keeps `package.json`'s version, as it does for npm) and runs
+`mcp-publisher`. The server name is `io.github.Godcreatebugs/raytrace`. npm is
+verified from `mcpName` in `package.json`; PyPI is verified from the
+`mcp-name:` line in `python/README.md`, which is the wheel's description. A
+registry version cannot be edited later, so the job runs only once both
+packages exist.
 
-For a retry, run **Publish npm package** from the Actions tab and enter the
-existing release tag. Already published versions are skipped, including
-`v0.13.0`; npm registry errors fail the job instead of attempting a publish.
-Prereleases are excluded from automatic publishing. Already published Releases
-are not triggered retroactively. To retry a failed automatic release, rerun
-its merged-PR workflow; to retry publishing an existing tag, use the manual
-publish action. Bot-created tags explicitly dispatch the pip wheels build,
-because GitHub does not trigger tag workflows for GITHUB_TOKEN pushes.
-PyPI uploading remains manual. Merging the automation PR itself produces a
-patch release unless that PR has `release:skip`.
+For a retry, run **Publish npm package** from the Actions tab, on `main`, and
+enter the release tag. npm and PyPI are skipped when that version is already
+there; the registry is skipped when that version is already listed. npm
+registry errors fail the job instead of attempting a publish. Prereleases are
+excluded from automatic publishing. Already published Releases are not
+triggered retroactively. To retry a failed automatic release, rerun its
+merged-PR workflow; to publish an existing tag, use the manual action.
+`v0.17.4` was tagged before the PyPI upload existed, and its npm publish
+stopped in the tests. After the trusted publisher is saved, run **Publish npm
+package** with tag `v0.17.4`. That uploads the wheels and lists the server.
+Tags from before the registry metadata (`v0.17.3` and earlier) cannot be
+listed: those npm releases have no `mcpName`. Merging a pull request produces
+a patch release unless that PR has `release:skip`.
 
-Build the same version's pip wheels and upload them before the registry re-run:
-
-```sh
-python3 python/build_wheels.py    # all six platforms, into python/dist/
-twine upload python/dist/*.whl
-```
-
-The *pip wheels* workflow builds the same wheels on every `v*` tag and installs
-them on Linux, macOS and Windows (x64 and ARM); its `wheels` artifact can be
-uploaded instead (`gh run download <run-id> -n wheels`). The Node.js version
-is `NODE_VERSION` in `python/build_wheels.py`. Run `twine upload` in a real
-terminal, since it asks for the PyPI token (username `__token__`); `--verbose`
-shows why PyPI refuses an upload. A version can only be uploaded once, and the
-PyPI page's description (`python/README.md`) only changes with a new version.
+The wheel build still checks the archives with `twine check`. The Node.js
+version bundled in them is `NODE_VERSION` in `python/build_wheels.py`. A
+version can only be uploaded to PyPI once, and the PyPI page's description
+(`python/README.md`) only changes with a new version.
 
 ## License
 
