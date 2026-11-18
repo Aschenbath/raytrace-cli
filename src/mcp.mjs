@@ -131,7 +131,8 @@ const TOOLS = [
       required: ['id', 'command'],
       additionalProperties: false,
     },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    // destructive: a shell command can delete or overwrite anything in the sandbox.
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
   },
   {
     name: 'get_command_result',
