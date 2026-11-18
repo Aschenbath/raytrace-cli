@@ -96,7 +96,8 @@ export function SandboxActivity({ box, stepFor, onOpenCall }: {
   if (error && !data) return <p role="alert" className="rt-problem">{error}</p>;
   if (!data) return <LoadingState label="Loading sandbox activity…" />;
   const reached = new Set(data.network.map((fact) => fact.host).filter(Boolean));
-  const unreached = data.lookups.filter((fact) => !reached.has(fact.name));
+  // One entry for a name: a lookup is a fact of the step that asked it when the resolver could tell which did.
+  const unreached = data.lookups.filter((fact, index, all) => !reached.has(fact.name) && all.findIndex((other) => other.name === fact.name) === index);
   const nothing = !data.network.length && !data.packages.length && !data.files.length && !data.lookups.length && !data.bulk.length && !data.identity.length;
   const gaps = [...data.network, ...data.files, ...data.packages].some((fact) => fact.coverage === 'gaps');
   if (nothing) return <p className="rt-empty">Nothing recorded yet. The kernel layer of the sandbox reports every connection the agent makes, the packages it installs,
@@ -120,7 +121,7 @@ export function SandboxActivity({ box, stepFor, onOpenCall }: {
         </tr>)}</tbody>
       </table></div>}
     {unreached.length > 0 && <p className="rt-foot">Looked up, with no connection seen: {unreached.slice(0, 40).map((fact, index) =>
-      <span key={fact.id} title={fact.failed ? `The lookup failed: ${fact.failed}` : fact.addresses.join(', ')}>{index ? ', ' : ''}<code>{fact.name}</code>{fact.failed ? ` (${fact.failed})` : ''}</span>)}
+      <span key={fact.id} title={`${fact.failed ? `The lookup failed: ${fact.failed}` : fact.addresses.join(', ')}${fact.process ? ` · asked by ${fact.process}` : ''}`}>{index ? ', ' : ''}<code>{fact.name}</code>{fact.failed ? ` (${fact.failed})` : ''}</span>)}
       {unreached.length > 40 ? ` and ${unreached.length - 40} more` : ''}.</p>}
 
     <div className="rt-list-head"><span>PACKAGES INSTALLED</span></div>
