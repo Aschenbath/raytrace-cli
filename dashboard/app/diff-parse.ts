@@ -3,7 +3,7 @@
 // A run of removed lines followed by added ones pairs up row by row, so a
 // replaced line sits next to its replacement instead of in a separate red
 // block far from the green one. Pure text work, apart from the view, so
-// the pairing can be tested (diff-parse.test.mjs).
+// the pairing can be tested (test/diff-parse.test.mjs).
 
 /** One side-by-side row. A null text is the blank side of a pure addition
  * (left) or removal (right); `note` is a diff aside ("No newline…"). */
@@ -19,7 +19,7 @@ export type ParsedDiff = {
   hunks: DiffHunk[];
   additions: number;
   deletions: number;
-  /** "Binary files differ": there are no lines to show. */
+  /** The diff includes a binary file with no text lines to show. */
   binary: boolean;
 };
 
@@ -42,7 +42,13 @@ export function parseDiff(text: string): ParsedDiff {
     removed = []; added = [];
   };
   const lines = String(text ?? '').split('\n');
-  lines.forEach((line, index) => {
+  lines.forEach((rawLine, index) => {
+    const line = rawLine.replace(/\r$/, '');
+    if (line.startsWith('diff --git ')) {
+      flush();
+      hunk = null;
+      return;
+    }
     if (/^Binary files .* differ$/.test(line) || line === 'GIT binary patch') { parsed.binary = true; return; }
     const started = HUNK.exec(line);
     if (started) {
@@ -52,7 +58,7 @@ export function parseDiff(text: string): ParsedDiff {
       oldNo = Number(started[1]); newNo = Number(started[2]);
       return;
     }
-    if (!hunk) return; // the file headers above the first hunk
+    if (!hunk) return; // file metadata before a hunk
     if (line.startsWith('\\')) { flush(); hunk.rows.push({ oldNo: null, oldText: null, newNo: null, newText: null, note: line.slice(1).trim() }); return; }
     if (line.startsWith('-')) { removed.push({ no: oldNo, text: line.slice(1) }); oldNo += 1; parsed.deletions += 1; return; }
     if (line.startsWith('+')) { added.push({ no: newNo, text: line.slice(1) }); newNo += 1; parsed.additions += 1; return; }
