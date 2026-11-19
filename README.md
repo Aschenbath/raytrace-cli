@@ -24,6 +24,7 @@
   <a href="https://pypi.org/project/raytrace-cli/">PyPI</a> ·
   <a href="docs/mcp.md">MCP</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
+  <a href="https://discord.gg/k7VWV5Gac9">Discord</a> ·
   <a href="https://github.com/Godcreatebugs/raytrace-cli/issues">Report an issue</a>
 </p>
 
@@ -32,6 +33,7 @@
   <a href="https://pypi.org/project/raytrace-cli/"><img src="https://img.shields.io/pypi/v/raytrace-cli?style=flat-square" alt="PyPI" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license" /></a>
   <a href="https://www.raytracer.si/"><img src="https://img.shields.io/badge/website-raytracer.si-111315?style=flat-square" alt="raytracer.si" /></a>
+  <a href="https://discord.gg/k7VWV5Gac9"><img src="https://img.shields.io/badge/Discord-join-5865F2?style=flat-square&logo=discord&logoColor=white" alt="Discord" /></a>
 </p>
 
 ## Why sandboxing matters

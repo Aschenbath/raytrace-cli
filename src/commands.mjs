@@ -7,6 +7,7 @@ import { portOf, proxyEnv, readConfig, writeConfig } from './config.mjs';
 import { checkRunningPid, dashboardLink, healthy, portInUse, PROXY_API, proxyApi, runningPid, start, status, stop } from './proxy-process.mjs';
 import { HOOK_COMMAND, hookState, setHook } from './claude-code.mjs';
 import { askSecret, confirm, interactive } from './prompt.mjs';
+import { maybeStarPrompt } from './star.mjs';
 
 const say = (line = '') => console.log(line);
 const CLOUD_URL = 'https://app.raytracer.si';
@@ -65,10 +66,11 @@ export async function setup(flags) {
 
   // A proxy this CLI started is restarted so the new settings apply.
   const port = portOf(readConfig());
-  if (runningPid()) { await stop(); say('\nRestarting RayTrace with the new settings.'); await startCommand(); return; }
-  if (await healthy(port)) { say(`\nA RayTrace proxy started outside this CLI is answering on :${port}; stop it to use these settings.`); return; }
-  if (flags['no-start'] || (!yes && !(await confirm('\nStart RayTrace now?', true)))) { say('\nRun `raytrace start` when you are ready.'); return; }
-  await startCommand({ open: !yes });
+  if (runningPid()) { await stop(); say('\nRestarting RayTrace with the new settings.'); await startCommand(); }
+  else if (await healthy(port)) say(`\nA RayTrace proxy started outside this CLI is answering on :${port}; stop it to use these settings.`);
+  else if (flags['no-start'] || (!yes && !(await confirm('\nStart RayTrace now?', true)))) say('\nRun `raytrace start` when you are ready.');
+  else await startCommand({ open: !yes });
+  maybeStarPrompt(flags);
 }
 
 // --------------------------------------------------------- start / stop / status
