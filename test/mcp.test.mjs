@@ -247,6 +247,9 @@ test('MCP: strings and enums are checked against their schema', async (t) => {
   const empty = await callTool(mcp, 19, 'sandbox_status', { id: '' });
   assert.match(empty.result.content[0].text, /id must be at least 1 character long\./);
 
+  const tooLong = await callTool(mcp, 28, 'sandbox_status', { id: 'a'.repeat(65) });
+  assert.match(tooLong.result.content[0].text, /id must be at most 64 characters long\./);
+
   const notString = await callTool(mcp, 20, 'sandbox_status', { id: 7 });
   assert.match(notString.result.content[0].text, /id must be a string\./);
 
