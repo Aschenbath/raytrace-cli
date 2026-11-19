@@ -6,6 +6,8 @@ the MCP server, and the dashboard — is described in the [README](README.md).
 
 If RayTrace is useful to you, a star on the repo helps other developers find it.
 
+Questions or want to pick up more issues? Join us on Discord: https://discord.gg/k7VWV5Gac9
+
 ## What you need
 
 - **Node.js 22.13 or newer** (`node --version`) and npm
