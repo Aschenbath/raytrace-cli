@@ -156,3 +156,135 @@ test('MCP: tools/call rejects unauthorized sandbox_status with tool error', asyn
   assert.equal(res.result.isError, true);
   assert.ok(res.result.content[0].text.length > 0);
 });
+
+// Argument checks run before any handler, so none of these need a sign-in or a VM.
+const callTool = (mcp, id, name, args) => mcp.send({
+  jsonrpc: '2.0',
+  id,
+  method: 'tools/call',
+  params: args === undefined ? { name } : { name, arguments: args },
+});
+
+test('MCP: a string where a boolean is expected is refused, not treated as true', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const res = await callTool(mcp, 8, 'destroy_sandbox', { id: 'some-sandbox', delete_logs: 'false' });
+  assert.equal(res.id, 8);
+  assert.equal(res.result.isError, true);
+  assert.match(res.result.content[0].text, /delete_logs must be true or false\./);
+});
+
+test('MCP: null or missing arguments count as none', async (t) => {
+  const mcp = startMcp({ RAYTRACE_API_KEY: 'test-key-override' });
+  t.after(() => mcp.close());
+
+  // login takes no arguments, so null and left out both run it.
+  const nulled = await callTool(mcp, 9, 'login', null);
+  assert.notEqual(nulled.result.isError, true);
+  assert.match(nulled.result.content[0].text, /RAYTRACE_API_KEY/);
+  const left = await callTool(mcp, 10, 'login');
+  assert.notEqual(left.result.isError, true);
+
+  // A tool with required arguments says which one is missing instead of throwing.
+  const missing = await callTool(mcp, 11, 'sandbox_status', null);
+  assert.equal(missing.result.isError, true);
+  assert.match(missing.result.content[0].text, /id is required\./);
+  assert.doesNotMatch(missing.result.content[0].text, /destructure/);
+});
+
+test('MCP: arguments that are not an object are refused', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const res = await callTool(mcp, 12, 'sandbox_status', 'x');
+  assert.equal(res.result.isError, true);
+  assert.match(res.result.content[0].text, /arguments must be an object\./);
+});
+
+test('MCP: an unknown argument is refused when the schema is closed', async (t) => {
+  const mcp = startMcp({ RAYTRACE_API_KEY: 'test-key-override' });
+  t.after(() => mcp.close());
+
+  const res = await callTool(mcp, 13, 'login', { extra: 1 });
+  assert.equal(res.result.isError, true);
+  assert.match(res.result.content[0].text, /extra is not an argument of login\. It takes no arguments\./);
+
+  const withProps = await callTool(mcp, 14, 'stop_sandbox', { id: 'some-sandbox', force: true });
+  assert.equal(withProps.result.isError, true);
+  assert.match(withProps.result.content[0].text, /force is not an argument of stop_sandbox\. It accepts: id\./);
+});
+
+test('MCP: a missing required argument is named', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const res = await callTool(mcp, 15, 'stop_sandbox', {});
+  assert.equal(res.result.isError, true);
+  assert.match(res.result.content[0].text, /id is required\./);
+});
+
+test('MCP: integers outside their range, or not whole, are refused', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+  const id = `rtp-${'a'.repeat(32)}`;
+
+  const high = await callTool(mcp, 16, 'run_command', { id, command: 'ls', timeout_seconds: 5000 });
+  assert.equal(high.result.isError, true);
+  assert.match(high.result.content[0].text, /timeout_seconds must be a whole number from 1 to 1800\./);
+
+  const fraction = await callTool(mcp, 17, 'run_command', { id, command: 'ls', timeout_seconds: 1.5 });
+  assert.match(fraction.result.content[0].text, /timeout_seconds must be a whole number\./);
+
+  const wait = await callTool(mcp, 18, 'get_command_result', { id, command_id: `cmd-${'b'.repeat(32)}`, wait_seconds: -1 });
+  assert.match(wait.result.content[0].text, /wait_seconds must be a whole number from 0 to 30\./);
+});
+
+test('MCP: strings and enums are checked against their schema', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const empty = await callTool(mcp, 19, 'sandbox_status', { id: '' });
+  assert.match(empty.result.content[0].text, /id must be at least 1 character long\./);
+
+  const notString = await callTool(mcp, 20, 'sandbox_status', { id: 7 });
+  assert.match(notString.result.content[0].text, /id must be a string\./);
+
+  const badId = await callTool(mcp, 21, 'run_command', { id: 'nope', command: 'ls' });
+  assert.match(badId.result.content[0].text, /id is not in the expected format/);
+
+  const badAgent = await callTool(mcp, 22, 'connect_sandbox', { id: 'some-sandbox', agent: 'gemini' });
+  assert.match(badAgent.result.content[0].text, /agent must be one of: claude, codex, none\./);
+});
+
+test('MCP: every problem is reported at once', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const res = await callTool(mcp, 23, 'destroy_sandbox', { keep_traces: 'yes', delete_logs: 1 });
+  const message = res.result.content[0].text;
+  assert.match(message, /id is required\./);
+  assert.match(message, /keep_traces must be true or false\./);
+  assert.match(message, /delete_logs must be true or false\./);
+});
+
+test('MCP: tools/call without a tool name is an invalid-params error', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const noParams = await mcp.send({ jsonrpc: '2.0', id: 24, method: 'tools/call' });
+  assert.equal(noParams.error.code, -32602);
+  assert.equal(noParams.error.message, 'Missing tool name');
+
+  const noName = await mcp.send({ jsonrpc: '2.0', id: 25, method: 'tools/call', params: {} });
+  assert.equal(noName.error.code, -32602);
+  assert.equal(noName.error.message, 'Missing tool name');
+
+  const wrongType = await mcp.send({ jsonrpc: '2.0', id: 26, method: 'tools/call', params: { name: 7 } });
+  assert.equal(wrongType.error.code, -32602);
+
+  // Names that only exist on Object.prototype are not tools.
+  const inherited = await mcp.send({ jsonrpc: '2.0', id: 27, method: 'tools/call', params: { name: 'constructor' } });
+  assert.equal(inherited.error.code, -32602);
+  assert.match(inherited.error.message, /Unknown tool/);
+});
