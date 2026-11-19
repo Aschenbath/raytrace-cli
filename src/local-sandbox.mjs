@@ -323,6 +323,15 @@ function sessionIds(id) {
 }
 
 /**
+ * What --delete-logs / --keep-logs ask for: true (delete), false (keep), or
+ * null (neither, so ask). Both together is a contradiction, not a choice.
+ */
+export function logsChoice(flags) {
+  if (flags['delete-logs'] && flags['keep-logs']) throw new Error('Pick one: --delete-logs or --keep-logs.');
+  return flags['delete-logs'] ? true : flags['keep-logs'] ? false : null;
+}
+
+/**
  * Deletes a local sandbox, and asks about the logs captured in it: deleted
  * with it, or moved to ~/.raytrace/archive/<name>-<time>/ (the Claude Code
  * transcripts and the VM's command, file and network evidence), staying in
@@ -330,6 +339,7 @@ function sessionIds(id) {
  * terminal and neither flag, the logs are kept.
  */
 export async function destroy(ref, flags, { ask, interactive }) {
+  let deleteLogs = logsChoice(flags);
   const id = pickId(ref);
   const box = registry()[id];
   if (!flags.yes) {
@@ -344,7 +354,6 @@ export async function destroy(ref, flags, { ask, interactive }) {
     const { uploadLogs } = await import('./upload.mjs');
     await uploadLogs({ sandbox: id, yes: true });
   }
-  let deleteLogs = flags['delete-logs'] ? true : flags['keep-logs'] ? false : null;
   if (deleteLogs === null) {
     deleteLogs = interactive()
       && /^y(es)?$/i.test((await ask('Also delete the logs captured in this sandbox? (yes/no) [no]: ')).trim());
