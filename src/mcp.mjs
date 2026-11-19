@@ -620,12 +620,62 @@ const HANDLERS = {
   cancel_command: (args) => cancelCommand(args),
 };
 
-async function callTool({ name, arguments: args = {}, _meta: meta } = {}) {
-  const handler = HANDLERS[name];
-  if (!handler) return null;
+// ------------------------------------------------------------- argument checks
+
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** What is wrong with `value` for `schema`, as a sentence naming `field`; null when it fits. Only the keywords TOOLS use. */
+function checkValue(field, value, schema) {
+  if (schema.type === 'boolean' && typeof value !== 'boolean') return `${field} must be true or false.`;
+  if (schema.type === 'string') {
+    if (typeof value !== 'string') return `${field} must be a string.`;
+    if (schema.minLength !== undefined && value.length < schema.minLength) return `${field} must be at least ${schema.minLength} character${schema.minLength === 1 ? '' : 's'} long.`;
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) return `${field} must be at most ${schema.maxLength} characters long.`;
+    if (schema.pattern && !new RegExp(schema.pattern).test(value)) return `${field} is not in the expected format (${schema.pattern}).`;
+  }
+  if (schema.type === 'integer') {
+    if (!Number.isInteger(value)) return `${field} must be a whole number.`;
+    const { minimum, maximum } = schema;
+    if ((minimum !== undefined && value < minimum) || (maximum !== undefined && value > maximum)) {
+      if (minimum !== undefined && maximum !== undefined) return `${field} must be a whole number from ${minimum} to ${maximum}.`;
+      return minimum !== undefined ? `${field} must be a whole number of at least ${minimum}.` : `${field} must be a whole number of at most ${maximum}.`;
+    }
+  }
+  if (schema.enum && !schema.enum.includes(value)) return `${field} must be one of: ${schema.enum.join(', ')}.`;
+  return null;
+}
+
+/** Every way `args` breaks the tool's inputSchema, as sentences for the agent; [] when it fits. */
+function validateArguments(tool, args) {
+  const { properties = {}, required = [], additionalProperties } = tool.inputSchema;
+  const problems = [];
+  for (const field of required) {
+    if (!Object.hasOwn(args, field)) problems.push(`${field} is required.`);
+  }
+  for (const [field, value] of Object.entries(args)) {
+    if (!Object.hasOwn(properties, field)) {
+      if (additionalProperties === false) {
+        const accepted = Object.keys(properties);
+        problems.push(`${field} is not an argument of ${tool.name}. ${accepted.length ? `It accepts: ${accepted.join(', ')}.` : 'It takes no arguments.'}`);
+      }
+      continue;
+    }
+    const problem = checkValue(field, value, properties[field]);
+    if (problem) problems.push(problem);
+  }
+  return problems;
+}
+
+async function callTool({ name, arguments: args, _meta: meta } = {}) {
+  const tool = TOOLS.find((each) => each.name === name);
+  if (!tool) return null;
+  // Missing or null arguments count as none; anything else must fit the tool's inputSchema before a handler sees it.
+  const given = args ?? {};
+  const problems = isPlainObject(given) ? validateArguments(tool, given) : ['arguments must be an object.'];
+  if (problems.length) return { ...text(problems.join(' ')), isError: true };
   try {
     // Each tool checks the sign-in where it does cloud work: local sandboxes need none.
-    return await handler(args, progress(meta?.progressToken));
+    return await HANDLERS[tool.name](given, progress(meta?.progressToken));
   } catch (error) {
     // Failures go back to the agent as tool results it can act on.
     return { ...text(error.message), isError: true };
@@ -658,6 +708,7 @@ async function handle(message) {
     case 'ping': return respond({});
     case 'tools/list': return respond({ tools: TOOLS });
     case 'tools/call': {
+      if (typeof params?.name !== 'string' || !params.name) return fail(-32602, 'Missing tool name');
       const result = await callTool(params);
       return result ? respond(result) : fail(-32602, `Unknown tool: ${params?.name}`);
     }
