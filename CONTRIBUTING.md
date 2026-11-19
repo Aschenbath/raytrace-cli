@@ -4,6 +4,8 @@ Thanks for wanting to help. This guide is how to set up a checkout, run the
 tests, and open a pull request. The product itself — local and cloud sandboxes,
 the MCP server, and the dashboard — is described in the [README](README.md).
 
+If RayTrace is useful to you, a star on the repo helps other developers find it.
+
 ## What you need
 
 - **Node.js 22.13 or newer** (`node --version`) and npm
