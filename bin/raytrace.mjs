@@ -194,6 +194,9 @@ if (command === 'sandbox') {
     } });
   } catch (error) { console.error(`${error.message}\n\nRun \`raytrace help\` for usage.`); process.exit(2); }
   const [sub, id] = parsed.positionals;
+  if (sub === 'destroy' && parsed.values['delete-logs'] && parsed.values['keep-logs']) {
+    console.error('raytrace sandbox destroy: Pick one: --delete-logs or --keep-logs.'); process.exit(2);
+  }
   const action = {
     create: () => sandbox.create(parsed.values),
     list: () => sandbox.list(parsed.values),
