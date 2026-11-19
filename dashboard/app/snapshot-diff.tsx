@@ -61,9 +61,12 @@ function useDiffMode(): ['split' | 'unified', (mode: 'split' | 'unified') => voi
 export function DiffText({ diff }: { diff: string }) {
   const parsed = useMemo(() => parseDiff(diff), [diff]);
   const [mode, setMode] = useDiffMode();
-  if (parsed.binary) return <p className="rt-files-note">A binary file: it changed, but there are no lines to show.</p>;
-  if (!parsed.hunks.length) return <pre className="rt-diff">{diff || '(no difference)'}</pre>;
+  if (!parsed.hunks.length) {
+    if (parsed.binary) return <p className="rt-files-note">A binary file: it changed, but there are no lines to show.</p>;
+    return <pre className="rt-diff">{diff || '(no difference)'}</pre>;
+  }
   return <div className="rt-diff-wrap">
+    {parsed.binary && <p className="rt-files-note">This diff also contains binary changes with no text lines to show.</p>}
     <div className="rt-diff-bar">
       <span><b className="rt-diff-add-n">+{parsed.additions}</b> <b className="rt-diff-del-n">−{parsed.deletions}</b></span>
       <span className="rt-diff-mode">
@@ -72,7 +75,7 @@ export function DiffText({ diff }: { diff: string }) {
       </span>
     </div>
     {mode === 'unified'
-      ? <pre className="rt-diff">{diff.split('\n').map((line, index) => <span key={index} className={lineClass(line)}>{line}{'\n'}</span>)}</pre>
+      ? <pre className="rt-diff">{diff.split(/\r?\n/).map((line, index) => <span key={index} className={lineClass(line)}>{line}{'\n'}</span>)}</pre>
       : <div className="rt-diff-scroll"><table className="rt-diff-split"><colgroup><col className="rt-diff-ln-col" /><col /><col className="rt-diff-ln-col" /><col /></colgroup><tbody>
         {parsed.hunks.map((hunk, hunkAt) => <Fragment key={hunkAt}>
           <tr className="rt-diff-hunk"><td colSpan={4}>{hunk.header}</td></tr>
