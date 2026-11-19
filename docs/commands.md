@@ -1,7 +1,7 @@
 # Command reference
 
-`raytrace help` lists everything. Setup and everyday use are in the
-[README](../README.md).
+Setup and everyday use are in the [README](../README.md). `raytrace help`
+shows these commands in the terminal.
 
 | Command | What it does |
 |---|---|
@@ -11,6 +11,8 @@
 | `raytrace sandbox list [--local]` | your sandboxes |
 | `raytrace sandbox start\|stop <id or name>` | start or stop one; stopping keeps its files |
 | `raytrace sandbox destroy <id or name>` | delete one. Cloud: `--keep-traces` (paid plans). Local: `--delete-logs` or `--keep-logs` |
+| `raytrace setup [--yes] [--no-claude-code] [--no-start] [--openrouter-key <key>]` | first-time settings: adds the Claude Code hook (`--no-claude-code`: don't), saves your settings, then starts RayTrace (`--no-start`: don't; `--yes`: no prompts; `--openrouter-key` turns on local summaries) |
+| `raytrace start` / `stop` / `status` | the local proxy and dashboard process: start it, stop it, or show whether it is running |
 | `raytrace open` | open the local dashboard at `http://127.0.0.1:8797` and sign the browser in |
 | `raytrace auth login\|status\|logout` | your RayTrace sign-in, for cloud sandboxes |
 | `raytrace upload logs [--sandbox <name>]` | send a local sandbox's recorded logs to the cloud dashboard; `raytrace upload status` shows your storage |
@@ -20,3 +22,5 @@
 | `raytrace --code <code>` | redeem a beta invite code |
 | `raytrace key [openrouter\|typesafe] [--remove]` | your keys for the dashboard's AI features |
 | `raytrace doctor` | what this machine has and lacks |
+| `raytrace uninstall [--purge] [--yes]` | stop RayTrace and remove the Claude Code hook; `--purge` also deletes the local sandbox VM and `~/.raytrace`; `--yes`: no prompts |
+| `raytrace --version` (or `-v`) | print the installed version |

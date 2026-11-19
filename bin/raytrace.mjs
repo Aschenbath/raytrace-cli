@@ -7,6 +7,19 @@ const HELP = `RayTrace: see what your coding agent did.
 
 Usage: raytrace <command>
 
+On this machine:
+  raytrace setup [--yes] [--no-claude-code] [--no-start] [--openrouter-key <key>]
+                                            first-time settings: adds the Claude Code hook
+                                            (--no-claude-code: don't), saves your settings, then
+                                            starts RayTrace (--no-start: don't; --yes: no prompts;
+                                            --openrouter-key turns on local summaries)
+  raytrace start | stop | status            the local proxy and dashboard process
+  raytrace open                             open the local dashboard and sign the browser in
+  raytrace doctor                           what this machine has and lacks
+  raytrace uninstall [--purge] [--yes]      stop RayTrace and remove the Claude Code hook; --purge
+                                            also deletes the local sandbox VM and ~/.raytrace
+  raytrace --version | -v                   print the installed version
+
 Get started in the cloud (preview):
   1. raytrace auth login             sign in, or create your account, in the browser
   2. raytrace sandbox create         from a Git repository: upload it to a new sandbox
