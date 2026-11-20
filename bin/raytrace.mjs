@@ -2,6 +2,7 @@
 // The `raytrace` command. Each subcommand lives in src/commands.mjs.
 import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
+import { closestCommand } from '../src/command-suggestion.mjs';
 
 const HELP = `RayTrace: see what your coding agent did.
 
@@ -103,6 +104,20 @@ AI features in the dashboard (summaries, recaps, Chain of thought), on your own 
 
 Your sign-in stays on this machine; raytrace auth logout removes it.`;
 
+const SANDBOX_HELP = [
+  'Usage: raytrace sandbox <command>',
+  ...HELP.split('\n').filter((line) => line.startsWith('  raytrace sandbox ')),
+  '  raytrace sandbox shell [id]',
+].join('\n');
+
+function unknownCommand(input, names, scope = '') {
+  const suggestion = closestCommand(input, names);
+  const prefix = scope ? `${scope} ` : '';
+  return `Unknown ${prefix}command: ${input}.`
+    + (suggestion ? ` Did you mean: raytrace ${prefix}${suggestion}?` : '')
+    + '\nRun raytrace help for all commands.';
+}
+
 // node:sqlite, which the recorder stores everything in, needs 22.13.
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 13)) {
@@ -197,7 +212,7 @@ if (command === 'sandbox') {
   if (sub === 'destroy' && parsed.values['delete-logs'] && parsed.values['keep-logs']) {
     console.error('raytrace sandbox destroy: Pick one: --delete-logs or --keep-logs.'); process.exit(2);
   }
-  const action = {
+  const actions = {
     create: () => sandbox.create(parsed.values),
     list: () => sandbox.list(parsed.values),
     shell: () => sandbox.shell(id, parsed.values),
@@ -205,8 +220,10 @@ if (command === 'sandbox') {
     stop: () => sandbox.stop(id, parsed.values),
     destroy: () => sandbox.destroy(id, parsed.values),
     files: () => sandbox.files(id, parsed.values),
-  }[sub];
-  if (!action) { console.error(`Unknown sandbox command: ${sub ?? '(none)'}\n\n${HELP}`); process.exit(2); }
+  };
+  const action = actions[sub];
+  if (!sub) { console.error(SANDBOX_HELP); process.exit(2); }
+  if (!action) { console.error(unknownCommand(sub, Object.keys(actions), 'sandbox')); process.exit(2); }
   try { await action(); process.exit(0); }
   catch (error) { console.error(`raytrace sandbox ${sub}: ${error.message}`); process.exit(1); }
 }
@@ -337,7 +354,7 @@ try {
   } }));
 } catch (error) { console.error(`${error.message}\n\nRun \`raytrace help\` for usage.`); process.exit(2); }
 
-const run = {
+const actions = {
   setup: () => commands.setup(flags),
   start: () => commands.startCommand(),
   stop: () => commands.stopCommand(),
@@ -345,8 +362,12 @@ const run = {
   open: () => commands.openCommand(),
   doctor: () => commands.doctor(),
   uninstall: () => commands.uninstall(flags),
-}[command];
+};
+const run = actions[command];
 
-if (!run) { console.error(`Unknown command: ${command}\n\n${HELP}`); process.exit(2); }
+if (!run) {
+  const names = [...Object.keys(actions), 'auth', 'code', 'codex', 'connect', 'export', 'help', 'hook', 'key', 'mcp', 'report', 'sandbox', 'share', 'upload'];
+  console.error(unknownCommand(command, names)); process.exit(2);
+}
 try { await run(); }
 catch (error) { console.error(`raytrace ${command}: ${error.message}`); process.exitCode = 1; }
