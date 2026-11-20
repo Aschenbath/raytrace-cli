@@ -35,7 +35,15 @@ function quote(value) {
   return delimiter ? `${delimiter}${value}${delimiter}` : value;
 }
 
-export const portOf = (config) => Number(config.RAYTACE_PORT || DEFAULT_PORT);
+export function portOf(config) {
+  const value = String(config.RAYTACE_PORT ?? '').trim();
+  if (!value) return DEFAULT_PORT;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`RAYTACE_PORT in ${paths.config} must be a port number from 1 to 65535 (got ${JSON.stringify(config.RAYTACE_PORT)}).`);
+  }
+  return port;
+}
 
 /** The environment the proxy and the Codex launcher run with. */
 export function proxyEnv(config = readConfig()) {
