@@ -6,10 +6,15 @@ import { dirname, join } from 'node:path';
 
 const hookPath = join(dirname(fileURLToPath(import.meta.url)), '../worker/sandbox/claude-hook.mjs');
 
+// Only RAYTRACE_ALLOW_ALL relaxes the hook's permission prompts; the rest are cleared so no test depends on where it
+// runs, and the CI/headless ones are set on purpose to prove they change nothing.
+const AMBIENT = ['CI', 'GITHUB_ACTIONS', 'HEADLESS', 'RAYTRACE_HEADLESS', 'RAYTRACE_ALLOW_ALL'];
+const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([name]) => !AMBIENT.includes(name)));
+
 function runHook(env, input) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [hookPath], {
-      env: { ...process.env, ...env }
+      env: { ...baseEnv, ...env }
     });
     let out = '';
     let err = '';
@@ -75,7 +80,7 @@ test('PreToolUse still asks in CI, GitHub Actions or generic headless environmen
   };
   // Ambient variables a CI runner or a wrapper script sets on its own must never turn the prompts off.
   for (const env of [{ CI: 'true' }, { CI: '1' }, { GITHUB_ACTIONS: 'true' }, { HEADLESS: '1' }, { RAYTRACE_HEADLESS: '1' }]) {
-    const res = await runHook({ RAYTRACE_ALLOW_ALL: '', ...env }, input);
+    const res = await runHook(env, input);
     assert.equal(res.hookSpecificOutput?.permissionDecision, 'ask', JSON.stringify(env));
   }
 });

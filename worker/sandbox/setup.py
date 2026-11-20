@@ -1,9 +1,23 @@
-"""Run with sudo INSIDE the dedicated Lima VM, never on the Mac.
+"""Sets a sandbox host up. Run with sudo on the host (inside the Lima VM locally, never on the Mac).
+
+Separate steps, each callable alone, in this order:
+
+    install    runsc, this core's files into --root, the trace config, sysctls
+    network    the sandbox network and its firewall (network.py)
+    services   the collector, viewer and resolver units, running from --root
+    image      the agent image, with the agent versions in agents.json (or given)
+    activate   services restarted in order (resolver, collector, viewer), then verified
+
+`python3 setup.py` runs them all with --root /opt/raytace: a local VM. A host
+layer can run any of them and add its own; each step writes only the core's
+files (/etc/raytace/*.json, resolv.conf, bridge*, image; the raytace-* units;
+--root), never another layer's.
 
 Which calls gVisor reports is not written here: trace_config() reads it from
 the catalog (syscall_catalog.sql, the `capture` column), so what a host
 subscribes to is what the catalog says, for the architecture it runs on.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -12,6 +26,8 @@ import platform
 import shutil
 import sqlite3
 import subprocess
+import sys
+import time
 import urllib.request
 
 # The runsc release installed. The catalog's numbers and coverage are generated
@@ -94,10 +110,13 @@ def trace_config(arch, catalog_sql, endpoint, calls=True):
                    'config': {'endpoint': endpoint, 'retries': 8}}]}}
 
 
-if __name__ == '__main__':
-    if platform.system() != 'Linux' or os.geteuid() != 0:
-        raise SystemExit('Run this setup with sudo inside the RayTrace Linux VM.')
-    arch = {'aarch64': 'aarch64', 'x86_64': 'x86_64'}[platform.machine()]
+SOURCE = Path(__file__).resolve().parent
+# What install copies: everything the host runs, nothing it does not (tests, caches).
+SKIP = ('test_', '__pycache__', '.', 'tests')
+UNITS = ('dns', 'collector', 'viewer')   # the restart order: what sandboxes resolve with first
+
+
+def install(root, arch):
     base = f'https://storage.googleapis.com/gvisor/releases/release/{RELEASE}/{arch}/'
     binary = urllib.request.urlopen(base + 'runsc', timeout=120).read()
     checksum = urllib.request.urlopen(base + 'runsc.sha512', timeout=30).read().decode().split()[0]
@@ -111,13 +130,8 @@ if __name__ == '__main__':
     staged.replace('/usr/local/bin/runsc')
     for directory in ['/opt/raytace', '/etc/raytace', '/var/lib/raytace', '/run/raytace']:
         Path(directory).mkdir(exist_ok=True, mode=0o700)
-    source = Path(__file__).parent
-    # The collector's own modules: the fact engine, the catalog it and this
-    # setup read, the path rules it shares with the initial scan, the resolver.
-    for name in ['collector.py', 'viewer.py', 'network.py', 'projects.py',
-                 'engine.py', 'dns_forwarder.py', 'file_scan.py', 'syscall_catalog.sql']:
-        shutil.copyfile(source / name, Path('/opt/raytace') / name)
-    config = trace_config(arch, (source / 'syscall_catalog.sql').read_text(), '/run/raytace/events.sock')
+    copy_core(root)
+    config = trace_config(arch, (root / 'syscall_catalog.sql').read_text(), '/run/raytace/events.sock')
     Path('/etc/raytace/gvisor.json').write_text(json.dumps(config, indent=2))
     # The engine watches the folder of every file an owner restricted or watches.
     # And room for events on their way to the collector, so a burst waits in
@@ -130,6 +144,35 @@ if __name__ == '__main__':
     run('sysctl', '-q', '-p', '/etc/sysctl.d/60-raytace.conf')
     run('/usr/local/bin/runsc', 'install', '--runtime=raytace-gvisor', '--',
         '--pod-init-config=/etc/raytace/gvisor.json')
+    # Docker reads its runtimes at start.
+    run('systemctl', 'restart', 'docker')
+
+
+def copy_core(root):
+    """This core's files into root (nothing to do when they are already there), with its VERSION."""
+    root.mkdir(parents=True, exist_ok=True, mode=0o755)
+    if root.resolve() != SOURCE:
+        for item in SOURCE.rglob('*'):
+            relative = item.relative_to(SOURCE)
+            if any(part.startswith(SKIP) for part in relative.parts) or item.suffix in ('.pyc', '.mjs') and 'test' in item.name:
+                continue
+            if item.is_dir():
+                (root / relative).mkdir(exist_ok=True)
+            else:
+                (root / relative).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(item, root / relative)
+    sys.path.insert(0, str(SOURCE))
+    from core import version
+    # Read from the package it ships in; an installed copy keeps the VERSION it came with.
+    if version():
+        (root / 'VERSION').write_text(version() + '\n')
+
+
+def network(root):
+    run('python3', str(root / 'network.py'))
+
+
+def services(root):
     for name, command in [('collector', 'collector.py --socket /run/raytace/events.sock --database /var/lib/raytace/runtime.db'),
                           ('viewer', 'viewer.py'), ('dns', 'dns_forwarder.py')]:
         # The resolver is what sandboxes resolve names with: it comes back whatever ended it.
@@ -137,7 +180,7 @@ if __name__ == '__main__':
 Description=RayTrace {name}
 After=network.target{' docker.service' if name == 'dns' else ''}
 [Service]
-ExecStart=/usr/bin/python3 /opt/raytace/{command}
+ExecStart=/usr/bin/python3 {root}/{command}
 Restart={'always' if name == 'dns' else 'on-failure'}
 RestartSec=2
 UMask=0077
@@ -157,12 +200,97 @@ WantedBy=multi-user.target
         Path('/etc/needrestart/conf.d/raytace.conf').write_text(
             "$nrconf{override_rc}{qr(^raytace-)} = 0;\n")
     run('systemctl', 'daemon-reload')
-    run('systemctl', 'restart', 'docker')
-    run('systemctl', 'enable', '--now', 'raytace-collector', 'raytace-viewer')
-    run('systemctl', 'restart', 'raytace-collector', 'raytace-viewer')
-    run('python3', '/opt/raytace/network.py')
-    # After the sandbox network exists: the resolver listens on its gateway.
-    run('systemctl', 'enable', 'raytace-dns')
-    run('systemctl', 'restart', 'raytace-dns')
-    run('docker', 'build', '-t', 'raytace-gvisor-agent', '-f', str(source / 'Dockerfile'), str(source))
+    run('systemctl', 'enable', *(f'raytace-{name}' for name in UNITS))
+
+
+def agent_versions(claude=None, codex=None):
+    """The exact agent versions the image is built with: given, or this core's tested ones (agents.json)."""
+    tested = json.loads((SOURCE / 'agents.json').read_text())
+    return {'claude_code': claude or tested['claude_code'], 'codex': codex or tested['codex']}
+
+
+def installed_agents(tag):
+    """What `claude --version` and `codex --version` say in an image."""
+    def ask(program):
+        out = subprocess.run(['docker', 'run', '--rm', '--network=none', '--entrypoint', program, tag, '--version'],
+                             capture_output=True, text=True, timeout=120)
+        return (out.stdout or out.stderr).strip()
+    return {'claude_code': ask('claude'), 'codex': ask('codex')}
+
+
+def image(tag, versions, write_default=True):
+    """Builds the agent image with these exact agent versions and checks it has them; its image id."""
+    run('docker', 'build', '-t', tag, '--build-arg', f'CLAUDE_CODE_VERSION={versions["claude_code"]}',
+        '--build-arg', f'CODEX_VERSION={versions["codex"]}', '-f', str(SOURCE / 'Dockerfile'), str(SOURCE))
+    found = installed_agents(tag)
+    for key, wanted in versions.items():
+        if wanted not in found[key]:
+            raise SystemExit(f'The image {tag} has {key} "{found[key]}", not {wanted}.')
+    if write_default:
+        Path('/etc/raytace/image').write_text(tag + '\n')
+    return subprocess.check_output(['docker', 'image', 'inspect', '-f', '{{.Id}}', tag], text=True).strip()
+
+
+def activate():
+    """Restarts the core's services in order and checks they serve."""
+    for name in UNITS:
+        run('systemctl', 'restart', f'raytace-{name}')
+    verify()
+
+
+def verify(seconds=20):
+    """The collector's socket is there and the resolver answers on the gateway, or SystemExit."""
+    sys.path.insert(0, str(SOURCE))
+    import network as net
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        active = all(subprocess.run(['systemctl', 'is-active', '--quiet', f'raytace-{name}']).returncode == 0 for name in UNITS)
+        if active and Path('/run/raytace/events.sock').exists() and resolves(net.GATEWAY):
+            return
+        time.sleep(1)
+    raise SystemExit('RayTrace: the collector or the sandbox resolver did not come up.')
+
+
+def resolves(server):
+    """Whether a DNS server answers a query for localhost. (A bare query, no library.)"""
+    import socket
+    import struct
+    query = struct.pack('>HHHHHH', 0x5254, 0x0100, 1, 0, 0, 0) + b'\x09localhost\x00' + struct.pack('>HH', 1, 1)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(2)
+        try:
+            sock.sendto(query, (server, 53))
+            return sock.recv(512)[:2] == query[:2]
+        except OSError:
+            return False
+
+
+STEPS = ['install', 'network', 'services', 'image', 'activate']
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Set a RayTrace sandbox host up (all steps by default).')
+    parser.add_argument('steps', nargs='*', choices=STEPS, help='only these steps, in the order given')
+    parser.add_argument('--root', default='/opt/raytace', help='where the core is installed and its services run from')
+    parser.add_argument('--image-tag', help='image: the tag to build (default raytace-gvisor-agent:<core version>)')
+    parser.add_argument('--claude-code', help='image: exact @anthropic-ai/claude-code version')
+    parser.add_argument('--codex', help='image: exact @openai/codex version')
+    opts = parser.parse_args()
+    if platform.system() != 'Linux' or os.geteuid() != 0:
+        raise SystemExit('Run this setup with sudo on the sandbox host (inside the RayTrace Linux VM locally).')
+    arch = {'aarch64': 'aarch64', 'x86_64': 'x86_64'}[platform.machine()]
+    root = Path(opts.root)
+    for step in opts.steps or STEPS:
+        if step == 'install':
+            install(root, arch)
+        elif step == 'network':
+            network(root)
+        elif step == 'services':
+            services(root)
+        elif step == 'image':
+            sys.path.insert(0, str(SOURCE))
+            from core import version
+            image(opts.image_tag or f'raytace-gvisor-agent:{version() or "dev"}', agent_versions(opts.claude_code, opts.codex))
+        elif step == 'activate':
+            activate()
     print('Ready.')

@@ -19,7 +19,8 @@ On this machine:
   raytrace doctor                           what this machine has and lacks
   raytrace uninstall [--purge] [--yes]      stop RayTrace and remove the Claude Code hook; --purge
                                             also deletes the local sandbox VM and ~/.raytrace
-  raytrace --version | -v                   print the installed version
+  raytrace --version | -v                   print the installed version (a newer published one is
+                                            noted on each command; RAYTRACE_NO_UPDATE_CHECK=1: don't)
 
 Get started in the cloud (preview):
   1. raytrace auth login             sign in, or create your account, in the browser
@@ -144,6 +145,12 @@ if (command === 'mcp') {
   const { serve } = await import('../src/mcp.mjs');
   await serve();
   process.exit(0);
+}
+
+// A newer published version: one line on stderr, from what the registry last said (src/update-check.mjs).
+{
+  const { checkForUpdate } = await import('../src/update-check.mjs');
+  checkForUpdate(command);
 }
 
 if (!command || command === 'help' || command === '--help' || command === '-h') { console.log(HELP); process.exit(0); }

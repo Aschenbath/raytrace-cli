@@ -20,6 +20,13 @@ REJECTED = ['0.0.0.0/8', '10.0.0.0/8', '100.64.0.0/10', '127.0.0.0/8',
             '169.254.0.0/16', '172.16.0.0/12', '192.168.0.0/16', '224.0.0.0/4']
 # The manager's bridge as sandboxes address it; projects.py puts it in their env.
 BRIDGE = Path('/etc/raytace/bridge')
+# A host layer may put a front before the bridge on the gateway (a port that
+# forwards to it): it writes the front's port here, and sandboxes then address
+# the front, while the bridge itself is kept in BRIDGE_UPSTREAM. engine.py
+# counts both as RayTrace's own. The direct way stays open, for sandboxes
+# made before the front.
+BRIDGE_FRONT = Path('/etc/raytace/bridge-front')
+BRIDGE_UPSTREAM = Path('/etc/raytace/bridge-upstream')
 
 
 def run(*args):
@@ -47,8 +54,30 @@ def private_bridge():
     (RAYTACE_BRIDGE, set once at setup like RAYTACE_DNS, then kept in BRIDGE)."""
     if os.environ.get('RAYTACE_BRIDGE'):
         return os.environ['RAYTACE_BRIDGE']
-    written = BRIDGE.read_text().strip().removeprefix('http://') if BRIDGE.exists() else ''
+    source = BRIDGE_UPSTREAM if BRIDGE_UPSTREAM.exists() else BRIDGE
+    written = source.read_text().strip().removeprefix('http://') if source.exists() else ''
     return written if written and not written.startswith((LIMA_HOST + ':', GATEWAY + ':')) else None
+
+
+def front_port():
+    """The port of the front before the bridge, or None without one."""
+    try:
+        port = int(BRIDGE_FRONT.read_text().strip())
+    except (OSError, ValueError):
+        return None
+    return port if 0 < port < 65536 and port != 53 else None
+
+
+def write_bridge(direct):
+    """Writes where sandboxes reach the bridge; the front's port when they reach it through one."""
+    port = front_port()
+    if port:
+        BRIDGE_UPSTREAM.write_text(direct + '\n')
+        BRIDGE.write_text(f'http://{GATEWAY}:{port}\n')
+        return port
+    BRIDGE_UPSTREAM.unlink(missing_ok=True)
+    BRIDGE.write_text(f'http://{direct}\n')
+    return None
 
 
 if __name__ == '__main__':
@@ -79,12 +108,15 @@ if __name__ == '__main__':
         # Above the private-range rejects: this one address and port, nothing else on the VPC.
         address, port = bridge.rsplit(':', 1)
         rule('DOCKER-USER', '-i', 'br-raytace', '-d', address, '-p', 'tcp', '--dport', port, '-j', 'ACCEPT')
-        BRIDGE.write_text(f'http://{bridge}\n')
+        direct = bridge
     elif dns == LIMA_HOST:
         rule('DOCKER-USER', '-i', 'br-raytace', '-d', LIMA_HOST,
              '-p', 'tcp', '--dport', '8799', '-j', 'ACCEPT')
-        BRIDGE.write_text(f'http://{LIMA_HOST}:8799\n')
+        direct = f'{LIMA_HOST}:8799'
     else:
         rule('INPUT', '-i', 'br-raytace', '-d', GATEWAY,
              '-p', 'tcp', '--dport', '8799', '-j', 'ACCEPT')
-        BRIDGE.write_text(f'http://{GATEWAY}:8799\n')
+        direct = f'{GATEWAY}:8799'
+    front = write_bridge(direct)
+    if front:
+        rule('INPUT', '-i', 'br-raytace', '-d', GATEWAY, '-p', 'tcp', '--dport', str(front), '-j', 'ACCEPT')
