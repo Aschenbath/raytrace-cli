@@ -17,6 +17,10 @@
     "src/",
     "proxy/",
     "worker/",
+    "!worker/**/test_*.py",
+    "!worker/**/*.test.mjs",
+    "!worker/**/__pycache__/",
+    "!worker/**/*.pyc",
     "dist/dashboard/",
     "THIRD_PARTY_NOTICES.md"
   ],

@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as fsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
-const root = resolve(fileURLToPath(new URL('../../', import.meta.url)));
+const root = resolve(fileURLToPath(new URL('../', import.meta.url)));
 const session = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const setup = (repo) => {
   const dir = mkdtempSync(join(tmpdir(), 'raytrace-delivery-'));
@@ -19,7 +19,7 @@ const setup = (repo) => {
   mkdirSync(join(home,'.raytace-codex'), {recursive:true});
   writeFileSync(join(home,'.raytace','sandbox-token'), 'synthetic-token');
   writeFileSync(join(home,'.raytace-codex','config.toml'), '"x-raytace-sandbox-token" = "synthetic-token"');
-  const hookPath = fileURLToPath(new URL('./claude-hook.mjs', import.meta.url));
+  const hookPath = fileURLToPath(new URL('../worker/sandbox/claude-hook.mjs', import.meta.url));
   const source = readFileSync(hookPath,'utf8')
     .replace("const home = process.env.HOME || '/home/node';", `const home = ${JSON.stringify(home)};`)
     .replace("const STATE_DIR = '/tmp/raytace-claude';", `const STATE_DIR = ${JSON.stringify(state)};`);

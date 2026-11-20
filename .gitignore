@@ -6,3 +6,5 @@ dist/
 *.tsbuildinfo
 python/dist/
 python/.cache/
+__pycache__/
+*.pyc

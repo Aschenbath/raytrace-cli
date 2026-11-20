@@ -106,12 +106,22 @@ export function vmStatus() {
   return line ? line.split(' ')[1] : null;
 }
 
-function setupVersion() {
-  const hash = createHash('sha256');
-  // Files only: a __pycache__ left by running the tests there is no part of what is installed.
-  for (const entry of readdirSync(SOURCE, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
-    if (entry.isFile()) hash.update(entry.name).update(readFileSync(join(SOURCE, entry.name)));
+/** Every file setup.py installs from (the core/ package too), by path from SOURCE, sorted. */
+export function setupFiles(folder = SOURCE, prefix = '') {
+  const found = [];
+  for (const entry of readdirSync(join(folder, prefix), { withFileTypes: true })) {
+    // A __pycache__ or cache left by running the tests there is no part of what is installed.
+    if (entry.name.startsWith('.') || entry.name === '__pycache__') continue;
+    const path = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) found.push(...setupFiles(folder, path));
+    else if (entry.isFile()) found.push(path);
   }
+  return found.sort();
+}
+
+export function setupVersion(folder = SOURCE) {
+  const hash = createHash('sha256');
+  for (const path of setupFiles(folder)) hash.update(path).update(readFileSync(join(folder, path)));
   return hash.digest('hex').slice(0, 16);
 }
 

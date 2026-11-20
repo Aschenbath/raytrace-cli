@@ -66,6 +66,22 @@ CONTAINERS = Path('/var/lib/raytace/containers')
 # Each sandbox's restricted and watched files (projects.py guardrails()).
 GUARDRAILS = Path('/var/lib/raytace/guardrails')
 BRIDGE = Path('/etc/raytace/bridge')
+# Behind a front (network.py write_bridge), BRIDGE names the front and this the
+# bridge itself, which sandboxes made before the front still call directly.
+BRIDGE_UPSTREAM = Path('/etc/raytace/bridge-upstream')
+
+
+def bridge_addresses():
+    """Every address:port a sandbox reaches RayTrace's own bridge at."""
+    found = set()
+    for path in (BRIDGE, BRIDGE_UPSTREAM):
+        try:
+            written = path.read_text().strip().removeprefix('http://')
+        except OSError:
+            continue
+        if written:
+            found.add(written)
+    return frozenset(found)
 WORKSPACE = '/workspace/'
 # Large, regenerable folders: the same ones the sandbox hook leaves out of its snapshots.
 SKIPPED = frozenset(['node_modules', '.git', '.next', '.vinext', 'dist', 'build', 'out', 'coverage', '.cache', '.turbo',
@@ -370,7 +386,7 @@ class Engine(threading.Thread):
         self.numbered = frozenset(number for number, (_, rule) in self.calls.items() if rule in ('remove', 'rename', 'resize', 'mkdir', 'metadata'))
         self.inbox = queue.Queue(maxsize=200_000)
         self.overflowed = float('-inf')
-        self.bridge = ('', float('-inf'))   # RayTrace's own bridge as sandboxes reach it, and when that was read
+        self.bridge = (frozenset(), float('-inf'))   # RayTrace's own bridge as sandboxes reach it, and when that was read
         self.boxes = {}
         self.facts = {}          # fact id -> the fact, while it may still grow
         self.dirty = {}          # fact ids to write
@@ -1127,10 +1143,7 @@ class Engine(threading.Thread):
             return
         now = self.clock()
         if now - self.bridge[1] > 30:
-            try:
-                self.bridge = (BRIDGE.read_text().strip().removeprefix('http://'), now)
-            except OSError:
-                self.bridge = ('', now)
+            self.bridge = (bridge_addresses(), now)
         if f'{ip}:{port}' == f'{network.GATEWAY}:53':
             # The resolver: dns_forwarder.py records the lookup itself, and names
             # its process from this, the connection the lookup was sent on.
@@ -1139,8 +1152,8 @@ class Engine(threading.Thread):
                 self.resolver.append((box.container, at_ns, who.get('pid'), who.get('start_ns'), who.get('name'),
                                       ' '.join(who.get('argv') or [])[:160] or None, who.get('call_id')))
             return
-        if f'{ip}:{port}' == self.bridge[0]:
-            return   # RayTrace's own: the model and transcript bridge
+        if f'{ip}:{port}' in self.bridge[0]:
+            return   # RayTrace's own: the model and transcript bridge, or a front before it (network.py)
         who = self.who(box, event)
         if listening:
             outcome = 'failed' if errno else 'listening'
