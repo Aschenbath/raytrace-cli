@@ -291,3 +291,79 @@ test('MCP: tools/call without a tool name is an invalid-params error', async (t)
   assert.equal(inherited.error.code, -32602);
   assert.match(inherited.error.message, /Unknown tool/);
 });
+
+// validateArguments in src/mcp.mjs only understands part of JSON Schema and skips any keyword it
+// does not know, so a schema that used more (an array, a nested object, oneOf, format, ...) would
+// go unchecked without anyone noticing. This guard fails first and says what to teach the validator.
+const TOP_LEVEL_KEYWORDS = ['type', 'properties', 'required', 'additionalProperties', 'description'];
+const PROPERTY_KEYWORDS = {
+  string: ['enum', 'pattern', 'minLength', 'maxLength'],
+  integer: ['enum', 'minimum', 'maximum'],
+  boolean: ['enum'],
+};
+
+function unsupportedSchemaUses({ name, inputSchema: schema }) {
+  const problems = [];
+  const unsupported = (where, what) => problems.push(
+    `${name}${where} uses ${what}, which validateArguments in src/mcp.mjs does not check. Teach it, then update this test.`,
+  );
+
+  for (const keyword of Object.keys(schema)) {
+    if (!TOP_LEVEL_KEYWORDS.includes(keyword)) unsupported('', `the keyword "${keyword}"`);
+  }
+  if (schema.type !== 'object') unsupported('', `a top-level type of ${JSON.stringify(schema.type)}`);
+  if (schema.additionalProperties !== undefined && typeof schema.additionalProperties !== 'boolean') {
+    unsupported('', 'a schema for additionalProperties');
+  }
+
+  for (const [field, property] of Object.entries(schema.properties ?? {})) {
+    const allowed = PROPERTY_KEYWORDS[property.type];
+    if (!allowed) {
+      unsupported(`.${field}`, `the type ${JSON.stringify(property.type)}`);
+      continue;
+    }
+    for (const keyword of Object.keys(property)) {
+      if (!['type', 'description', ...allowed].includes(keyword)) {
+        unsupported(`.${field}`, `the keyword "${keyword}" on the ${property.type} property`);
+      }
+    }
+  }
+  return problems;
+}
+
+test('MCP: every tool schema only uses keywords the argument validator checks', async (t) => {
+  const mcp = startMcp();
+  t.after(() => mcp.close());
+
+  const res = await mcp.send({ jsonrpc: '2.0', id: 29, method: 'tools/list' });
+  assert.ok(res.result.tools.length > 0);
+  assert.deepEqual(res.result.tools.flatMap(unsupportedSchemaUses), []);
+});
+
+test('MCP: the schema keyword guard catches what the validator cannot check', () => {
+  const problems = unsupportedSchemaUses({
+    name: 'demo',
+    inputSchema: {
+      type: 'object',
+      oneOf: [],
+      additionalProperties: { type: 'string' },
+      properties: {
+        list: { type: 'array', items: { type: 'string' } },
+        nested: { type: 'object', properties: {} },
+        label: { type: 'string', format: 'uri', minimum: 1 },
+        size: { type: 'integer', maxLength: 3 },
+        fine: { type: 'string', description: 'ok', pattern: '^a$', minLength: 1, maxLength: 4 },
+      },
+    },
+  });
+  const all = problems.join('\n');
+  assert.equal(problems.length, 7);
+  assert.match(all, /demo uses the keyword "oneOf"/);
+  assert.match(all, /demo uses a schema for additionalProperties/);
+  assert.match(all, /demo\.list uses the type "array"/);
+  assert.match(all, /demo\.nested uses the type "object"/);
+  assert.match(all, /demo\.label uses the keyword "format" on the string property/);
+  assert.match(all, /demo\.label uses the keyword "minimum" on the string property/);
+  assert.match(all, /demo\.size uses the keyword "maxLength" on the integer property/);
+  assert.doesNotMatch(all, /demo\.fine/);
+});
