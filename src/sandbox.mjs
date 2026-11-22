@@ -142,11 +142,40 @@ export async function creditPlan() {
   return { plan: 'none', beta };
 }
 
+const SANDBOX_SIZES = ['small', 'medium', 'large'];
+
+export function validateSize(raw) {
+  if (raw == null || raw === '') return null;
+  const size = String(raw).trim().toLowerCase();
+  if (!SANDBOX_SIZES.includes(size)) {
+    throw new Error(`Invalid sandbox size "${raw}". Choose one of: ${SANDBOX_SIZES.join(', ')}.`);
+  }
+  return size;
+}
+
+export function formatActionError(error) {
+  if (!(error instanceof ApiError)) return error;
+  const code = error.data?.code;
+  const url = error.data?.topup_url || 'https://raytracer.si/account.html';
+  if (error.status === 402 && code === 'recording_plan_required') {
+    return new ApiError(`${error.message}\nUpgrade to a recording plan first: ${url}`, { status: error.status, data: error.data });
+  }
+  if (error.status === 402 && code === 'insufficient_balance') {
+    return new ApiError(`${error.message}\nTop up sandbox credits at: ${url}`, { status: error.status, data: error.data });
+  }
+  if (error.status === 503 && code === 'no_capacity') {
+    return new ApiError(`${error.message} Try a smaller --size or retry shortly.`, { status: error.status, data: error.data });
+  }
+  return error;
+}
+
 /** Create a cloud sandbox from a packed project. A credit refusal comes back
  * as an ApiError (see isCreditRefusal) for the caller to decide on. */
-export function upload(archive, name, useCredit) {
+export function upload(archive, name, useCredit, size = null) {
   const headers = { 'content-type': 'application/gzip', 'x-raytrace-name': name.replace(/[^A-Za-z0-9._ -]/g, '-').slice(0, 100) };
-  return call('POST', '/v1/sandboxes', { body: archive, headers: useCredit ? { ...headers, 'x-raytrace-beta-credit': '1' } : headers });
+  if (size) headers['x-raytrace-size'] = size;
+  if (useCredit) headers['x-raytrace-beta-credit'] = '1';
+  return call('POST', '/v1/sandboxes', { body: archive, headers });
 }
 
 /** The API refused the credit: 409 already used on another sandbox, 410 expired. */
@@ -156,6 +185,7 @@ export async function create(flags) {
   const root = repoRoot();
   if (!root) throw new Error('Run this from inside a Git repository.');
   const name = flags.name || basename(root);
+  const requestedSize = flags.local ? null : validateSize(flags.size);
   // What the machine lacks is said before the project is read, and Lima fetched if agreed.
   const localName = flags.local ? local.sandboxName(flags, root) : null;
   if (flags.local) await local.preflight(flags, { confirm, interactive });
@@ -176,20 +206,25 @@ export async function create(flags) {
   say(`Packing ${files.length} files (${(total / 1048576).toFixed(1)} MiB) from ${root}`);
   if (skipped.length) say(`Not uploaded (${skipped.length}): ${skipped.slice(0, 8).join(', ')}${skipped.length > 8 ? ', ...' : ''}`);
   const archive = await packArchive(root, files);
-  say('Creating the sandbox (the first one on a host takes a little longer)...');
+  say(`Creating the ${requestedSize || 'small'} sandbox (the first one on a host takes a little longer)...`);
   let box;
   try {
-    box = await upload(archive, name, useCredit);
+    box = await upload(archive, name, useCredit, requestedSize);
   } catch (error) {
-    if (!useCredit || !isCreditRefusal(error)) throw error;
+    if (!useCredit || !isCreditRefusal(error)) throw formatActionError(error);
     say(error.status === 410 ? 'Your free beta sandbox expired before it was created.'
       : 'Your free beta sandbox was already created.');
     if (!interactive() || !(await confirm('Create a regular sandbox instead?', false))) {
       throw new Error('Not created as your free beta sandbox; no sandbox was created.');
     }
-    box = await upload(archive, name, false);
+    try {
+      box = await upload(archive, name, false, requestedSize);
+    } catch (retryError) {
+      throw formatActionError(retryError);
+    }
   }
-  say(`\nSandbox ${box.id} is running.`);
+  const actualSize = box.size || requestedSize;
+  say(`\nSandbox ${box.id}${actualSize ? ` (${actualSize})` : ''} is running.`);
   if (box.credit_applied) {
     say(`Your free beta sandbox${betaEnds(box) ? `, until ${formatCreditDeadline(betaEnds(box))}` : ''}. It shows as Beta in the dashboard.`);
   }
@@ -207,18 +242,64 @@ export async function list(flags = {}) {
     // The sandbox's creation time (seconds), or its container's once that is known.
     const created = typeof box.created === 'number' ? box.created * 1000 : Date.parse(box.created);
     const age = Math.round((Date.now() - created) / 60000);
+    const status = box.restoring ? 'restoring' : String(box.status);
+    const size = box.size ? `  ${String(box.size).padEnd(6)}` : '';
     const beta = box.beta ? `  Beta${betaEnds(box) ? ` (until ${formatCreditDeadline(betaEnds(box))})` : ''}` : '';
-    say(`${box.id}  ${String(box.status).padEnd(8)}  ${box.name}${beta}  (${age < 120 ? `${age} min` : `${Math.round(age / 60)} h`} old)`);
+    say(`${box.id}  ${status.padEnd(9)}${size}  ${box.name}${beta}  (${age < 120 ? `${age} min` : `${Math.round(age / 60)} h`} old)`);
   }
+}
+
+async function waitForRestore(sandboxId) {
+  const pollMs = Math.max(10, Number(process.env.RAYTRACE_RESTORE_POLL_MS) || 2000);
+  const deadline = Date.now() + 10 * 60_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const boxes = await call('GET', '/v1/sandboxes');
+    const found = Array.isArray(boxes) ? boxes.find((b) => b.id === sandboxId) : null;
+    if (!found) throw new Error(`Sandbox ${sandboxId} disappeared while restoring.`);
+    if (found.restore_error) throw new Error(`Restore failed: ${found.restore_error}`);
+    if (found.status === 'running' && !found.restoring) return found;
+  }
+  throw new Error(`Timed out waiting for ${sandboxId} to finish restoring. Check status with: raytrace sandbox list`);
 }
 
 export async function start(id, flags = {}) {
   if (flags.local || local.isLocal(id)) return local.start(id);
-  const box = await call('POST', `/v1/sandboxes/${await pickId(id)}/start`); say(`${box.id} running`);
+  const requestedSize = validateSize(flags.size);
+  const targetId = await pickId(id);
+  const opts = requestedSize
+    ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ size: requestedSize }) }
+    : {};
+  let box;
+  try {
+    box = await call('POST', `/v1/sandboxes/${targetId}/start`, opts);
+  } catch (error) {
+    throw formatActionError(error);
+  }
+  if (box.restoring || box.status === 'starting') {
+    say(`${targetId} is restoring from archive in the background...`);
+    box = await waitForRestore(targetId);
+  }
+  const actualSize = box.size || requestedSize;
+  say(`${box.id || targetId}${actualSize ? ` (${actualSize})` : ''} running`);
+  if (box.restore_warning) say(`Note: ${box.restore_warning}`);
+  else if (box.restored_from_archive) say('Note: Restored from archive — sign in to Claude Code or Codex again inside the sandbox.');
 }
 export async function stop(id, flags = {}) {
   if (flags.local || local.isLocal(id)) return local.stop(id);
   const box = await call('POST', `/v1/sandboxes/${await pickId(id)}/stop`); say(`${box.id} stopped; its files are kept`);
+}
+export async function keepAlive(id, flags = {}) {
+  if (flags.local || local.isLocal(id)) {
+    throw new Error('Keep-alive applies to cloud sandboxes only (local sandboxes do not auto-stop).');
+  }
+  const targetId = await pickId(id);
+  try {
+    await call('POST', `/v1/sandboxes/${targetId}/keep-alive`);
+  } catch (error) {
+    throw formatActionError(error);
+  }
+  say(`${targetId} kept alive: idle auto-stop paused for 60 minutes.`);
 }
 
 export async function files(id, flags = {}) {

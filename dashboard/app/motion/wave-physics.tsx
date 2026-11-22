@@ -67,17 +67,17 @@ export function WavePhysicsLoader({ theme = 'light' }: { theme?: 'light' | 'dark
         const bar_h = baseBarH + wave_val * wavePeakH - indent;
         barsData[i].heights.push(`${Math.max(4, bar_h)}px`);
 
-        // Colors for Light Theme: zinc-200 to zinc-800
+        // RayTrace olive-to-lime ramp matching raytracer.si.
         const isDark = theme === 'dark';
         let r, g, b;
         if (isDark) {
-          r = Math.round(39 + wave_val * (228 - 39));
-          g = Math.round(39 + wave_val * (228 - 39));
-          b = Math.round(42 + wave_val * (231 - 42));
+          r = Math.round(38 + wave_val * (201 - 38));
+          g = Math.round(49 + wave_val * (237 - 49));
+          b = Math.round(29 + wave_val * (114 - 29));
         } else {
-          r = Math.round(228 - wave_val * (228 - 39));
-          g = Math.round(228 - wave_val * (228 - 39));
-          b = Math.round(231 - wave_val * (231 - 42));
+          r = Math.round(220 - wave_val * (220 - 100));
+          g = Math.round(228 - wave_val * (228 - 127));
+          b = Math.round(206 - wave_val * (206 - 45));
         }
         barsData[i].colors.push(`rgb(${r}, ${g}, ${b})`);
       }
@@ -93,10 +93,10 @@ export function WavePhysicsLoader({ theme = 'light' }: { theme?: 'light' | 'dark
           <motion.span
             key={i}
             className="rt-wave-bar"
-            style={{ height: reducedMotion ? '16px' : bar.heights[0], backgroundColor: reducedMotion ? (theme === 'dark' ? '#a5ad9c' : '#646d5b') : bar.colors[0] }}
+            style={{ height: reducedMotion ? '16px' : bar.heights[0], backgroundColor: reducedMotion ? (theme === 'dark' ? '#9cb668' : '#647f2d') : bar.colors[0] }}
             animate={{
               height: reducedMotion ? '16px' : bar.heights,
-              backgroundColor: reducedMotion ? (theme === 'dark' ? '#a5ad9c' : '#646d5b') : bar.colors,
+              backgroundColor: reducedMotion ? (theme === 'dark' ? '#9cb668' : '#647f2d') : bar.colors,
             }}
             transition={{
               duration: reducedMotion ? 0 : 4,
@@ -110,7 +110,7 @@ export function WavePhysicsLoader({ theme = 'light' }: { theme?: 'light' | 'dark
         <motion.span
           className="rt-wave-ball"
           initial={{ x: reducedMotion ? 140 : 0, y: reducedMotion ? -24 : -44 }}
-          style={{ bottom: 0, left: 0, transformOrigin: 'bottom center', background: theme === 'dark' ? '#fbfdf9' : '#171915' }}
+          style={{ bottom: 0, left: 0, transformOrigin: 'bottom center', background: theme === 'dark' ? '#c9ed72' : '#647f2d' }}
           animate={{
             x: reducedMotion ? 140 : ballX,
             y: reducedMotion ? -24 : ballY,

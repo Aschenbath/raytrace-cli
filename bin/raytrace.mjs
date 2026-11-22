@@ -30,8 +30,9 @@ Get started in the cloud (preview):
 
 Cloud sandboxes:
   raytrace auth login|status|logout         your RayTrace sign-in
-  raytrace sandbox create [--name <name>]   upload this Git repository to a new sandbox
-                                            (up to 200 MiB, 25 MiB a file, 20,000 files)
+  raytrace sandbox create [--name <name>] [--size small|medium|large]
+                                            upload this Git repository to a new sandbox
+                                            (up to 200 MiB, 25 MiB a file, 20,000 files; default: small)
   raytrace connect [id] [--claude|--codex]  a terminal in it; with one sandbox the id is
                                             optional (same as: raytrace sandbox shell [id]);
                                             --claude or --codex starts that agent in it at
@@ -39,7 +40,10 @@ Cloud sandboxes:
   raytrace --code <code>                    beta invite: redeem a code RayTrace gave you for one
                                             free 3-day sandbox (signed in first; also: raytrace code <code>)
   raytrace sandbox list
-  raytrace sandbox start|stop [id]
+  raytrace sandbox start [id] [--size small|medium|large]
+                                            start a stopped or archived sandbox (optionally resize)
+  raytrace sandbox stop [id]
+  raytrace sandbox keep-alive [id]          pause the 15-minute idle auto-stop for 60 minutes
   raytrace sandbox destroy [id] [--yes] [--keep-traces]
                                             delete it; traces go too unless --keep-traces (paid plans)
 
@@ -206,6 +210,7 @@ if (command === 'sandbox') {
     parsed = parseArgs({ args: rest, strict: true, allowPositionals: true, options: {
       yes: { type: 'boolean', short: 'y' },
       name: { type: 'string' },
+      size: { type: 'string' },
       local: { type: 'boolean' },
       'delete-logs': { type: 'boolean' },
       'keep-logs': { type: 'boolean' },
@@ -225,6 +230,7 @@ if (command === 'sandbox') {
     shell: () => sandbox.shell(id, parsed.values),
     start: () => sandbox.start(id, parsed.values),
     stop: () => sandbox.stop(id, parsed.values),
+    'keep-alive': () => sandbox.keepAlive(id, parsed.values),
     destroy: () => sandbox.destroy(id, parsed.values),
     files: () => sandbox.files(id, parsed.values),
   };
