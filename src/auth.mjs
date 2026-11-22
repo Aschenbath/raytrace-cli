@@ -189,6 +189,15 @@ export async function status() {
   say(`Organization: ${org || session.organization_id || 'personal'}`);
   const left = Math.round((exp * 1000 - Date.now()) / 60000);
   say(left > 0 ? `Access token valid for ${left} more min; renewed automatically.` : 'Access token expired; it is renewed on the next command.');
+  // Prepaid credit balance from /v1/me when the control plane supports it.
+  try {
+    const { call } = await import('./api.mjs');
+    const me = await call('GET', '/v1/me', { autoLogin: false });
+    if (me?.credits && typeof me.credits.balance_usd === 'number') {
+      const warn = me.credits.low_balance || (me.credits.balance_micros ?? 0) < 0 ? ' (low — top up at https://raytracer.si/account.html)' : '';
+      say(`Credits: $${me.credits.balance_usd.toFixed(2)}${warn}`);
+    }
+  } catch { /* old backend or offline */ }
   // Beta is a cloud entitlement, separate from any local licence tier.
   try {
     const { betaEnds, betaStatus, formatCreditDeadline } = await import('./beta.mjs');
