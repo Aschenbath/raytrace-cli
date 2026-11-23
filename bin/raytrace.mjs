@@ -178,7 +178,7 @@ if (command === 'auth') {
   const auth = await import('../src/auth.mjs');
   const sub = rest[0];
   const action = { login: auth.loginCommand, status: auth.status, logout: auth.logout }[sub];
-  if (!action) { console.error(`Usage: raytrace auth login | status | logout`); process.exit(2); }
+  if (!action || rest.length !== 1) { console.error(`Usage: raytrace auth login | status | logout`); process.exit(2); }
   try { await action(); process.exit(0); }
   catch (error) { console.error(`raytrace auth ${sub}: ${error.message}`); process.exit(1); }
 }
@@ -197,6 +197,7 @@ if (command === 'connect') {
 // `raytrace key [openrouter|typesafe] [--remove]`: the keys the dashboard's AI features use.
 if (command === 'key') {
   const args = rest.filter((arg) => arg !== '--remove');
+  if (rest.includes('--remove') && !args.length) { console.error('Usage: raytrace key <openrouter|typesafe> --remove'); process.exit(2); }
   if (args.length > 1 || args[0]?.startsWith('-')) { console.error('Usage: raytrace key [openrouter|typesafe] [--remove]'); process.exit(2); }
   const { keyCommand } = await import('../src/commands.mjs');
   try { await keyCommand(args[0], { remove: rest.includes('--remove') }); process.exit(0); }
@@ -295,6 +296,7 @@ if (command === 'export') {
 }
 
 if (command === 'share') {
+  const usage = 'Usage: raytrace share <trace-id> [--sandbox <id>] [--fork] | raytrace share --list | raytrace share --revoke <id>';
   let parsed;
   try {
     parsed = parseArgs({ args: rest, strict: true, allowPositionals: true, options: {
@@ -304,28 +306,29 @@ if (command === 'share') {
       fork: { type: 'boolean' },
     } });
   } catch (error) {
-    console.error(`${error.message}\n\nUsage: raytrace share <trace-id> [--sandbox <id>] [--fork] | raytrace share --list | raytrace share --revoke <id>`);
+    console.error(`${error.message}\n\n${usage}`);
     process.exit(2);
   }
   const [sub, ...extra] = parsed.positionals;
+  const listing = parsed.values.list || sub === 'list';
+  const revoking = parsed.values.revoke !== undefined || sub === 'revoke';
+  const shareId = parsed.values.revoke ?? extra[0];
+  const creationFlags = parsed.values.sandbox !== undefined || parsed.values.fork !== undefined;
+  if ((listing && (revoking || creationFlags || parsed.positionals.length !== (sub === 'list' ? 1 : 0)))
+      || (revoking && (creationFlags || !shareId || (parsed.values.revoke !== undefined
+        ? parsed.positionals.length !== 0 : extra.length !== 1)))
+      || (!listing && !revoking && (!sub || extra.length))) {
+    console.error(usage); process.exit(2);
+  }
   const share = await import('../src/share.mjs');
   try {
-    if (parsed.values.list || sub === 'list') {
+    if (listing) {
       await share.listShares();
       process.exit(0);
     }
-    if (parsed.values.revoke || sub === 'revoke') {
-      const shareId = parsed.values.revoke || extra[0];
-      if (!shareId) {
-        console.error('Usage: raytrace share --revoke <id> (or raytrace share revoke <id>)');
-        process.exit(2);
-      }
+    if (revoking) {
       await share.revokeShare(shareId);
       process.exit(0);
-    }
-    if (!sub || extra.length > 0) {
-      console.error('Usage: raytrace share <trace-id> [--sandbox <id>] [--fork] | raytrace share --list | raytrace share --revoke <id>');
-      process.exit(2);
     }
     await share.sharePrompt(sub, { sandboxId: parsed.values.sandbox, allowFork: parsed.values.fork });
     process.exit(0);
@@ -356,16 +359,23 @@ if (command === 'report') {
   } catch (error) { console.error(`raytrace report: ${error.message}`); process.exit(1); }
 }
 
-let flags;
-try {
-  ({ values: flags } = parseArgs({ args: rest, strict: true, options: {
+const commandOptions = {
+  setup: {
     yes: { type: 'boolean', short: 'y' },
     'no-claude-code': { type: 'boolean' },
     'no-start': { type: 'boolean' },
     'openrouter-key': { type: 'string' },
-    purge: { type: 'boolean' },
-  } }));
-} catch (error) { console.error(`${error.message}\n\nRun \`raytrace help\` for usage.`); process.exit(2); }
+  },
+  uninstall: { purge: { type: 'boolean' }, yes: { type: 'boolean', short: 'y' } },
+};
+const commandUsage = {
+  setup: 'Usage: raytrace setup [--yes] [--no-claude-code] [--no-start] [--openrouter-key <key>]',
+  uninstall: 'Usage: raytrace uninstall [--purge] [--yes]',
+};
+let flags;
+try {
+  ({ values: flags } = parseArgs({ args: rest, strict: true, options: commandOptions[command] ?? {} }));
+} catch (error) { console.error(`${error.message}\n\n${commandUsage[command] ?? `Usage: raytrace ${command}`}`); process.exit(2); }
 
 const actions = {
   setup: () => commands.setup(flags),
