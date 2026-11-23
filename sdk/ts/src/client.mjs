@@ -108,6 +108,56 @@ export function repoName(repo) {
   return String(repo).replace(/\/+$/, '').split(/[/:]/).filter(Boolean).pop().replace(/\.git$/, '') || 'sandbox';
 }
 
+// GitHub's rules for account and repository names (RayTrace's API checks the same).
+const GITHUB_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
+const GITHUB_URL = /^(?:https:\/\/github\.com\/|ssh:\/\/git@github\.com\/|git@github\.com:)?([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/i;
+
+/** `owner/name` for a GitHub repository given as owner/name or a github.com https or ssh URL; null for anything else. */
+export function githubRepo(repo) {
+  const name = GITHUB_URL.exec(String(repo ?? '').trim())?.[1];
+  if (!name || !GITHUB_NAME.test(name) || ['.', '..'].includes(name.split('/')[1])) return null;
+  return name;
+}
+
+/** The branch a connected sandbox works on. Its agent may push only to raytrace/<these 8 characters>/... */
+export function workBranch(sandboxId) {
+  return `raytrace/${String(sandboxId).slice(4, 12)}/work`;
+}
+
+const GIT_REF = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,200}$/;
+const GIT_COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+const quote = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
+
+/**
+ * The shell commands that turn a sandbox's uploaded files into a clone of
+ * `repo`: a Git repository whose origin is GitHub (the sandbox's relay opens
+ * it), lined up with `commit` (when GitHub has it), else `ref`, else the
+ * default branch, on a branch of its own. The uploaded files stay as they are;
+ * a file the upload left out (a secret, say) is taken from the commit, so it
+ * is not committed as deleted. A folder that is already a repository is left alone.
+ */
+export function connectScript({ repo, sandboxId, ref = undefined, commit = undefined, dir = '/workspace' }) {
+  const name = githubRepo(repo);
+  if (!name) throw new Error(`Not a GitHub repository: ${repo} (use owner/name)`);
+  if (ref !== undefined && !GIT_REF.test(String(ref))) throw new Error(`Not a branch or tag name: ${ref}`);
+  if (commit !== undefined && !GIT_COMMIT.test(String(commit))) throw new Error(`Not a commit id: ${commit}`);
+  const fallback = quote(ref ?? 'HEAD');
+  const branch = workBranch(sandboxId);
+  return [
+    'set -e',
+    `cd ${quote(dir)}`,
+    `if [ -e .git ]; then echo "RayTrace: $(pwd) is already a Git repository; left as it is." >&2; exit 0; fi`,
+    'git -c init.defaultBranch=main init -q',
+    `git remote add origin ${quote(`https://github.com/${name}.git`)}`,
+    commit ? `git fetch -q --depth 1 origin ${commit} 2>/dev/null || git fetch -q --depth 1 origin ${fallback}`
+      : `git fetch -q --depth 1 origin ${fallback}`,
+    'git reset -q FETCH_HEAD',
+    'if [ -n "$(git ls-files --deleted)" ]; then git ls-files -z --deleted | git checkout -q --pathspec-from-file=- --pathspec-file-nul; fi',
+    `git checkout -q -b ${quote(branch)}`,
+    `echo ${quote(`Connected to ${name} on branch ${branch}. Push with: git push -u origin ${branch}`)}`,
+  ].join('\n');
+}
+
 /**
  * Clones `repo` (shallow; `ref` is a branch or tag) into a temporary folder and
  * packs it like archiveFromDirectory, then deletes the clone. Uses the git on
