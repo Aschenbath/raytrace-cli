@@ -35,7 +35,10 @@ export interface CreateSandboxOptions {
   archive?: Uint8Array;
   files?: Record<string, string | Uint8Array>;
   dir?: string;
+  /** Clone this repository and upload it: an https or ssh URL, or `owner/name` on GitHub. Uses this machine's git and its credentials. */
   repo?: string;
+  /** With `repo`: the branch or tag to clone (default: the repository's default branch). */
+  ref?: string;
   idempotencyKey?: string;
 }
 
@@ -134,4 +137,5 @@ export class RayTrace {
 
 export function buildTarGz(files: Record<string, string | Uint8Array>): Buffer;
 export function archiveFromDirectory(dirPath: string): Buffer;
+export function archiveFromRepo(repo: string, options?: { ref?: string }): Promise<Buffer>;
 export default RayTrace;

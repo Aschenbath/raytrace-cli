@@ -39,6 +39,7 @@ sandbox.stop()
 | Call | What it does |
 | --- | --- |
 | `rt.sandboxes.create(name=, size=, directory= \| files= \| archive=)` | New sandbox from a folder, an in-memory file map, or `.tar.gz` bytes |
+| `rt.sandboxes.create(repo=, ref=)` | New sandbox from a Git repository: an https or ssh URL, or `owner/name` on GitHub; `ref` picks a branch or tag. Cloned with this machine's `git` and credentials |
 | `rt.sandboxes.list()` / `rt.sandboxes.get(id)` | Your organization's sandboxes |
 | `sandbox.exec(command, timeout_seconds=)` | Runs a command and waits for the result (`exit_code`, `stdout`, `stderr`, `state`) |
 | `sandbox.stop()` | Stops it; files are kept and billing stops |
