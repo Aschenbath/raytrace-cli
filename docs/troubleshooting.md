@@ -25,6 +25,114 @@
 - **A sandbox isn't found:** `raytrace auth status` shows which account you're
   signed in as. Sandboxes belong to the account that made them.
 
+## First local sandbox setup
+
+The commands below are for macOS and Linux. On Windows, follow the
+[WSL2 guide](windows.md). Start with `raytrace doctor`; it checks prerequisites
+without downloading Lima or creating a sandbox.
+
+### Find the VM and its logs
+
+`raytrace doctor` says whether Lima is **installed** or **downloaded by
+RayTrace**. Use that same binary for the commands below:
+
+```sh
+LIMACTL=limactl                         # installed Lima 2.0 or newer
+# If doctor reports a managed copy, use its directory plus /bin/limactl:
+# LIMACTL="$HOME/.raytrace/lima/2.2.1/bin/limactl"
+"$LIMACTL" list
+```
+
+The managed version and directory are printed by `doctor`; do not use an older
+`limactl` on your PATH instead. If you set `RAYTRACE_HOME`, the managed copy and
+RayTrace logs are under that directory rather than `~/.raytrace`.
+
+In a second terminal, watch the VM setup log:
+
+```sh
+tail -f "${RAYTRACE_HOME:-$HOME/.raytrace}/logs/sandbox-vm.log"
+```
+
+An MCP create request also writes `logs/mcp-create-<name>-*.log` under the same
+RayTrace home. These files may not exist yet while Lima itself is downloading.
+
+### A download or provisioning step is slow
+
+The first run downloads Lima if needed, an Ubuntu image, and dependencies for
+the sandbox image (about 1 GB in total). Later runs reuse the VM. Check the
+latest log lines for download progress or a concrete network error; a quiet
+terminal alone does not mean setup failed. Slow networks can take longer than
+the usual few minutes.
+
+If the download fails, check that your network can reach GitHub releases and
+the image/package URLs named in the log, then retry `raytrace sandbox create
+--local` from your repository. For a Lima download error, installing Lima 2.0+
+yourself is another option; see [Lima installation](https://lima-vm.io/docs/installation/).
+A checksum mismatch must be resolved before continuing; do not bypass it.
+
+### Port 8798 is already in use
+
+8798 is the VM's evidence viewer port, separate from the dashboard on 8797.
+Check `"$LIMACTL" list` and identify the listener:
+
+```sh
+lsof -nP -iTCP:8798 -sTCP:LISTEN          # macOS, or Linux with lsof
+# On Linux, alternatively: ss -ltnp 'sport = :8798'
+```
+
+Stop the application that owns the port, or stop the other Lima VM with
+`"$LIMACTL" stop <its-name>` if it is safe to interrupt its work. Do not delete
+another VM to free the port. If the `raytrace` VM is already running, RayTrace
+normally reuses it and recognizes that the viewer port belongs to it. Rerun
+`raytrace doctor` before retrying.
+
+### Linux reports missing or inaccessible /dev/kvm
+
+```sh
+ls -l /dev/kvm
+id -nG
+```
+
+If the device is absent, enable hardware virtualization in your firmware; on a
+virtual machine, the host must expose nested virtualization. Without KVM,
+emulation can be very slow. If the device exists but `doctor` reports no access,
+on systems using the `kvm` group run `sudo usermod -aG kvm "$USER"`, then log out
+and back in. Verify with `raytrace doctor`. Also install the QEMU package named
+by `doctor` if it is missing.
+
+### Setup was interrupted
+
+Wait for the previous create/Lima process to finish or stop it before retrying;
+do not run two setups at once. Check `"$LIMACTL" list` and the logs. Rerun
+`raytrace sandbox create --local` from the same repository: it starts an existing
+stopped `raytrace` VM, reuses a running one, and reruns incomplete VM provisioning.
+
+If `raytrace sandbox list --local` already lists your sandbox, use
+`raytrace sandbox start <name>` and then `raytrace connect <name>` instead of
+creating the same name again. This can happen when setup was interrupted after
+the sandbox was registered.
+
+### Reset a half-created first-run VM
+
+Use this only after the checks above, when the first VM cannot start or finish
+provisioning and there are no local sandboxes you need to keep. **Deleting the
+`raytrace` VM deletes every local sandbox and all data inside that VM**, including
+changes that exist only there. Check `raytrace sandbox list --local` and save
+needed work first. Your original project on the host is separate.
+
+Once the previous setup process has stopped:
+
+```sh
+"$LIMACTL" delete --force raytrace
+raytrace sandbox create --local         # from your Git repository
+```
+
+This resets the VM, not RayTrace's host-side registry or logs. If you already
+have registered sandboxes, follow their individual start/destroy workflow
+instead of treating this as a first-run reset. If setup still fails, include
+your OS, `raytrace doctor` output and relevant log lines in an issue, with keys
+and private paths redacted.
+
 ## Uninstall
 
 ```sh
