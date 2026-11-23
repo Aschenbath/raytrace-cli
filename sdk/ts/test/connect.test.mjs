@@ -203,3 +203,19 @@ test('a failed connect says the sandbox exists and hands it over', async () => {
   assert.equal(notInstalled.sandbox.id, SID);
   assert.ok(!refused.calls.some((call) => call.path.endsWith('/commands')));
 });
+
+const hasPython = spawnSync('python3', ['--version']).status === 0;
+
+test('the Python SDK runs the same setup script, byte for byte', { skip: !hasPython && 'python3 not installed' }, () => {
+  const cases = [{ repo: 'acme/app' }, { repo: 'https://github.com/acme/app.git', ref: 'release/1.2' },
+    { repo: 'git@github.com:acme/app', commit: 'a'.repeat(40), ref: 'v2' }, { repo: 'acme/app', dir: "/tmp/it's here" }];
+  const python = spawnSync('python3', ['-I', '-c', `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from raytrace_sdk.client import connect_script
+print(json.dumps([connect_script(c['repo'], c['sandboxId'], ref=c.get('ref'), commit=c.get('commit'), directory=c.get('dir', '/workspace'))
+                  for c in json.loads(sys.argv[2])]))`, new URL('../../python', import.meta.url).pathname,
+  JSON.stringify(cases.map((c) => ({ ...c, sandboxId: SID })))], { encoding: 'utf8' });
+  assert.equal(python.status, 0, python.stderr);
+  assert.deepEqual(JSON.parse(python.stdout), cases.map((c) => connectScript({ ...c, sandboxId: SID })));
+});
