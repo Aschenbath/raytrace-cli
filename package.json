@@ -25,7 +25,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "engines": {
-    "node": ">=22.13.0"
+    "node": "^22.16.0 || >=24"
   },
   "scripts": {
     "test": "node --disable-warning=ExperimentalWarning --experimental-strip-types --test test/*.test.mjs proxy/*.test.mjs",

@@ -37,7 +37,7 @@ If `raytrace --version` fails, install the CLI:
 npm install -g @raytrace-cli/cli
 ```
 
-That package needs Node.js 22.13 or newer. `pip install raytrace-cli` and `uv tool install raytrace-cli` install the same CLI and include Node.js. Where a command below uses `npx -y @raytrace-cli/cli@latest`, `uvx --from raytrace-cli raytrace` is the same CLI.
+That package needs Node.js 22.16 or newer. `pip install raytrace-cli` and `uv tool install raytrace-cli` install the same CLI and include Node.js. Where a command below uses `npx -y @raytrace-cli/cli@latest`, `uvx --from raytrace-cli raytrace` is the same CLI.
 
 To give this chat the RayTrace tools, add the MCP server `raytrace`:
 

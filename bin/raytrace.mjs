@@ -123,10 +123,12 @@ function unknownCommand(input, names, scope = '') {
     + '\nRun raytrace help for all commands.';
 }
 
-// node:sqlite, which the recorder stores everything in, needs 22.13.
+// The recorder stores everything in node:sqlite and searches it with SQLite's FTS5,
+// which Node.js builds in from 22.16 (22.13-22.15 and 23.x ship node:sqlite without it,
+// and every evidence database then fails with "no such module: fts5").
 const [major, minor] = process.versions.node.split('.').map(Number);
-if (major < 22 || (major === 22 && minor < 13)) {
-  console.error(`RayTrace needs Node.js 22.13 or newer; this is ${process.version}.`);
+if (major < 22 || (major === 22 && minor < 16) || major === 23) {
+  console.error(`RayTrace needs Node.js 22.16 or newer (or 24+); this is ${process.version}.`);
   process.exit(1);
 }
 
