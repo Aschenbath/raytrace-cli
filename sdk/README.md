@@ -18,11 +18,15 @@ cd sdk/python && python3 -m pytest -q tests
 
 ## Releasing
 
-1. Bump `version` in **both** `sdk/ts/package.json` and `sdk/python/pyproject.toml` (and the `User-Agent` version in `sdk/python/raytrace_sdk/client.py`), through a pull request labelled `release:skip` so the CLI is not released with it.
-2. After it merges, create a GitHub release on `main` with the tag `sdk-vX.Y.Z` matching that version.
-3. [`sdk-publish.yml`](../.github/workflows/sdk-publish.yml) runs the tests and publishes both packages with trusted publishing. No token or login is needed. A version a registry already has is skipped, so re-running is safe.
+Automatic. When a pull request that changes `sdk/` merges into `main`, [`sdk-publish.yml`](../.github/workflows/sdk-publish.yml):
+
+1. takes the next version after the highest `sdk-vX.Y.Z` tag: a patch by default, or a minor or major with the `release:minor` / `release:major` label (`release:skip` releases nothing), the same labels the CLI uses;
+2. writes it into `sdk/ts/package.json`, `sdk/python/pyproject.toml` and the Python `User-Agent`, in a commit reachable only from the new `sdk-v` tag (as with the CLI, `main` keeps its versions, which only act as a floor);
+3. creates the GitHub release, runs both test suites, and publishes to npm and PyPI with trusted publishing. No token or login is needed, and a version a registry already has is skipped.
+
+A pull request that changes only the SDKs does not release the CLI. To publish a tag again, run *Publish SDKs* from the Actions tab with that `sdk-v` tag.
 
 ### One-time registry setup
 
 - **PyPI:** on pypi.org, *Your account → Publishing → Add a new pending publisher*: project `raytrace-sdk`, owner `Godcreatebugs`, repository `raytrace-cli`, workflow `sdk-publish.yml`, environment `pypi`. The first release creates the project.
-- **npm:** a trusted publisher can only be added to a package that exists, so publish 0.1.0 once by hand (`npm login`, then `cd sdk/ts && npm publish --access public`). Then, on npmjs.com, *@raytrace-cli/sdk → Settings → Trusted publisher*: GitHub Actions, `Godcreatebugs/raytrace-cli`, workflow `sdk-publish.yml`, environment `npm`. Every later version publishes from the workflow.
+- **npm:** on npmjs.com, *@raytrace-cli/sdk → Settings → Trusted publisher*: GitHub Actions, `Godcreatebugs/raytrace-cli`, workflow `sdk-publish.yml`, environment `npm`, allowed action publish.
