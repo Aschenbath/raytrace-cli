@@ -118,7 +118,7 @@ function api(routes) {
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     const u = new URL(url);
-    const call = { method: init.method || 'GET', path: u.pathname, body: init.body ? JSON.parse(init.body) : null };
+    const call = { method: init.method || 'GET', path: u.pathname, body: typeof init.body === 'string' ? JSON.parse(init.body) : null };
     calls.push(call);
     const [status, body] = (routes[`${call.method} ${call.path}`] || (() => [404, { error: 'Not found' }]))(call, calls);
     return new Response(JSON.stringify(body), { status });
@@ -149,4 +149,57 @@ test("sandbox.repos.set passes on the API's refusal as it is", async () => {
   const { rt } = api({ [`PUT /v1/sandboxes/${SID}/repos`]: () => [400, { error: message }] });
   const box = new Sandbox(rt.client, { id: SID });
   await assert.rejects(box.repos.set(['acme/app']), (error) => error instanceof RayTraceError && error.status === 400 && error.message === message);
+});
+
+/** A sandbox API that creates SID and runs one command, answering it with `result`. */
+function connectApi(result, { attached = [], putStatus = 200 } = {}) {
+  return api({
+    'POST /v1/sandboxes': () => [201, { id: SID, name: 'app', status: 'running' }],
+    [`GET /v1/sandboxes/${SID}/repos`]: () => [200, { id: SID, repos: attached }],
+    [`PUT /v1/sandboxes/${SID}/repos`]: (call) => (putStatus === 200 ? [200, { id: SID, repos: call.body.repos }]
+      : [putStatus, { error: 'Install the RayTrace GitHub App on acme/app and connect it on your account page first.' }]),
+    [`POST /v1/sandboxes/${SID}/commands`]: () => [202, { command_id: 'cmd-1', state: 'running' }],
+    [`GET /v1/sandboxes/${SID}/commands/cmd-1`]: () => [200, { command_id: 'cmd-1', ...result }],
+  });
+}
+
+test('create({ connect }) uploads, attaches the repository, then runs the setup in the sandbox', async () => {
+  const { rt, calls } = connectApi({ state: 'completed', exit_code: 0, stdout: 'Connected\n', stderr: '' }, { attached: ['acme/lib'] });
+  const box = await rt.sandboxes.create({ files: { 'app.js': 'x' }, repo: 'acme/app', ref: 'main', connect: true });
+  assert.deepEqual(box.git, { repo: 'acme/app', branch: 'raytrace/01234567/work', output: 'Connected\n' });
+  assert.deepEqual(calls.map((call) => `${call.method} ${call.path}`), ['POST /v1/sandboxes', `GET /v1/sandboxes/${SID}/repos`,
+    `PUT /v1/sandboxes/${SID}/repos`, `POST /v1/sandboxes/${SID}/commands`, `GET /v1/sandboxes/${SID}/commands/cmd-1`]);
+  // What was attached already stays attached.
+  assert.deepEqual(calls[2].body, { repos: ['acme/lib', 'acme/app'] });
+  const run = calls[3].body;
+  assert.equal(run.command, connectScript({ repo: 'acme/app', sandboxId: SID, ref: 'main' }));
+  assert.equal(run.timeout_seconds, 300);
+});
+
+test('connectRepo does not attach a repository twice', async () => {
+  const { rt, calls } = connectApi({ state: 'completed', exit_code: 0, stdout: '', stderr: '' }, { attached: ['ACME/app'] });
+  await new Sandbox(rt.client, { id: SID }).connectRepo('acme/app');
+  assert.ok(!calls.some((call) => call.method === 'PUT'));
+});
+
+test('create({ connect }) checks the repository and ref before uploading anything', async () => {
+  const { rt, calls } = connectApi({});
+  await assert.rejects(rt.sandboxes.create({ files: { a: 'x' }, connect: true }), /connect needs repo/);
+  await assert.rejects(rt.sandboxes.create({ files: { a: 'x' }, repo: 'https://gitlab.com/acme/app', connect: true }), /connect needs repo/);
+  await assert.rejects(rt.sandboxes.create({ files: { a: 'x' }, repo: 'acme/app', ref: '--upload-pack=x', connect: true }), /Not a branch/);
+  assert.equal(calls.length, 0);
+});
+
+test('a failed connect says the sandbox exists and hands it over', async () => {
+  const failed = connectApi({ state: 'completed', exit_code: 128, stdout: '', stderr: "fatal: couldn't find remote ref nope\n" });
+  const error = await failed.rt.sandboxes.create({ files: { a: 'x' }, repo: 'acme/app', ref: 'nope', connect: true }).catch((e) => e);
+  assert.equal(error.message, `Sandbox ${SID} was created, but could not connect ${SID} to acme/app: fatal: couldn't find remote ref nope`);
+  assert.equal(error.sandbox.id, SID);
+
+  const refused = connectApi({}, { putStatus: 400 });
+  const notInstalled = await refused.rt.sandboxes.create({ files: { a: 'x' }, repo: 'acme/app', connect: true }).catch((e) => e);
+  assert.match(notInstalled.message, new RegExp(`^Sandbox ${SID} was created, but Install the RayTrace GitHub App on acme/app`));
+  assert.equal(notInstalled.status, 400);
+  assert.equal(notInstalled.sandbox.id, SID);
+  assert.ok(!refused.calls.some((call) => call.path.endsWith('/commands')));
 });
