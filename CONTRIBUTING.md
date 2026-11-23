@@ -10,7 +10,7 @@ Questions or want to pick up more issues? Join us on Discord: https://discord.gg
 
 ## What you need
 
-- **Node.js 22.13 or newer** (`node --version`) and npm
+- **Node.js 22.16 or newer** (`node --version`) and npm
 - **Git**
 - For trying a **local sandbox** from your checkout: macOS 13.5 or later, or
   Linux with Lima, QEMU, and access to `/dev/kvm`. Windows is experimental;

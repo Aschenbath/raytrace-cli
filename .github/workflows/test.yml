@@ -1,0 +1,65 @@
+# Tests every pull request, from this repository or a fork, and every push to main.
+# pull_request (not pull_request_target): a fork's code runs with a read-only
+# token and no secrets, so it can test but cannot publish or write anything.
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    name: CLI (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.16', '24']  # engines.node: ^22.16.0 || >=24 (the first 22 with SQLite FTS5)
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+
+  sdk:
+    name: SDKs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: TypeScript SDK
+        working-directory: sdk/ts
+        run: npm test
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python SDK
+        working-directory: sdk/python
+        run: |
+          python3 -m pip install --quiet pytest
+          python3 -m pytest -q tests
+
+  sandbox-core:
+    name: Sandbox core (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python3 -B -m unittest discover -s worker/sandbox -p 'test_*.py'

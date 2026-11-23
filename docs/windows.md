@@ -39,7 +39,7 @@ because it is Linux:
 
    Reboot if Windows asks, then open Ubuntu once to finish its setup.
 
-2. Inside Ubuntu, install RayTrace. The npm package needs Node.js 22.13
+2. Inside Ubuntu, install RayTrace. The npm package needs Node.js 22.16
    or newer; the PyPI package brings its own Node:
 
    ```sh

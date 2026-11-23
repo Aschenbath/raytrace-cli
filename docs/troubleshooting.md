@@ -4,7 +4,7 @@
 
 - **The MCP server doesn't show up in my editor:** restart the editor after
   adding it. In Claude Code, `claude mcp list` shows whether it's connected.
-  Check that `node --version` is 22.13 or newer.
+  Check that `node --version` is 22.16 or newer (Node.js 23 is not supported).
 - **No terminal opened after "connect":** the agent's reply has the command to
   paste, such as `raytrace connect my-box --claude`. On macOS, allow your editor
   to control your terminal app in **System Settings → Privacy & Security →

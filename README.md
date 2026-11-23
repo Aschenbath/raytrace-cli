@@ -106,7 +106,7 @@ raytrace open                               # run in another terminal to open th
   The dashboard is at `http://127.0.0.1:8797` by default. If you set
   `RAYTACE_PORT` in `~/.raytrace/config.env`, the dashboard is on that port instead.
 
-The npm package needs **Node.js 22.13 or newer** (`node --version`) on macOS or
+The npm package needs **Node.js 22.16 or newer** (`node --version`) on macOS or
 Linux. The PyPI package installs the same CLI with its own Node.js, so you
 don't need Node on the machine. Windows is experimental. Where this page says
 `npx -y @raytrace-cli/cli@latest`, use `uvx --from raytrace-cli raytrace`
