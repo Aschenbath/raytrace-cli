@@ -9,7 +9,7 @@ export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 
 export type ChangedFile = {
   path: string;
-  /** The last thing that happened to it (A added, M edited, D deleted, T type). */
+  /** Change from the prompt's base (A added, M edited, D deleted, T type). */
   status: string;
   /** Lines added/removed summed over the steps that touched it; null = binary. */
   added: number | null;
@@ -38,6 +38,7 @@ export type PromptChanges = {
 export function summarizeChanges(trace: Trace): PromptChanges {
   const calls = trace.callVerifications ?? [];
   const files = new Map<string, ChangedFile>();
+  const addedInPrompt = new Set<string>();
   const steps: PromptChanges['steps'] = [];
   const snapshots = calls.flatMap((call) => (call.snapshot ? [call.snapshot] : []));
   const tooBig = new Set<string>();
@@ -47,15 +48,18 @@ export function summarizeChanges(trace: Trace): PromptChanges {
     for (const path of snapshot.too_big ?? []) tooBig.add(path);
     if (snapshot.changed && snapshot.changes.length) steps.push({ call, number: index + 1 });
     for (const change of snapshot.changes) {
+      if (!files.has(change.path) && change.status === 'A') addedInPrompt.add(change.path);
       const found = files.get(change.path) ?? { path: change.path, status: change.status, added: 0, removed: 0, calls: [] };
-      found.status = change.status;
+      found.status = addedInPrompt.has(change.path)
+        ? (change.status === 'D' ? 'D' : 'A')
+        : (change.status === 'A' ? 'M' : change.status);
       if (change.added == null || found.added == null) { found.added = null; found.removed = null; }
       else { found.added += change.added; found.removed = (found.removed ?? 0) + (change.removed ?? 0); }
       if (!found.calls.includes(index + 1)) found.calls.push(index + 1);
       files.set(change.path, found);
     }
   });
-  const list = [...files.values()];
+  const list = [...files.values()].filter(file => !(addedInPrompt.has(file.path) && file.status === 'D'));
   return {
     files: list,
     steps,
