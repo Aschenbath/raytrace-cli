@@ -8,7 +8,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import tarfile
+import tempfile
 import time
 from typing import Any, Callable, Mapping
 import urllib.error
@@ -80,6 +83,55 @@ def build_tar_gz(files: Mapping[str, str | bytes]) -> bytes:
                 info.gid = 1000
                 tar.addfile(info, io.BytesIO(data))
     return buf.getvalue()
+
+
+# git transports a repository URL may use: https and ssh only, so a URL such
+# as ext::<command> can never run a program.
+_GIT_ENV = {'GIT_ALLOW_PROTOCOL': 'https:ssh', 'GIT_TERMINAL_PROMPT': '0'}
+_GITHUB_SHORTHAND = re.compile(r'^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$')
+_HOST_PATH = re.compile(r'^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+/[^\s:]+$')
+_URL = re.compile(r'^(https://\S+|ssh://\S+|[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:\S+)$')
+
+
+def repo_url(repo: str) -> str:
+    """The clone URL for `repo`: an https or ssh URL as given, host/owner/name over https, or GitHub's owner/name."""
+    value = str(repo or '').strip()
+    if _GITHUB_SHORTHAND.match(value):
+        return f"https://github.com/{re.sub(r'[.]git$', '', value)}.git"
+    if _HOST_PATH.match(value):
+        return f'https://{value}'
+    if _URL.match(value):
+        return value
+    raise ValueError(f'Unsupported repo "{value}": use an https or ssh URL, or owner/name for GitHub')
+
+
+def repo_name(repo: str) -> str:
+    """The name a repository gives a sandbox: its last path segment, without .git."""
+    parts = [p for p in re.split(r'[/:]', str(repo).rstrip('/')) if p]
+    return re.sub(r'[.]git$', '', parts[-1]) if parts else 'sandbox'
+
+
+def archive_from_repo(repo: str, *, ref: str | None = None) -> bytes:
+    """Clones `repo` (shallow; `ref` is a branch or tag) into a temporary folder,
+    packs it like archive_from_directory, then deletes the clone. Uses the git on
+    this machine and its credentials; it never waits for a password prompt."""
+    tmp = tempfile.mkdtemp(prefix='raytrace-repo-')
+    try:
+        target = os.path.join(tmp, 'repo')
+        args = ['git', 'clone', '--depth', '1', '--quiet']
+        if ref:
+            args += ['--branch', str(ref)]
+        args += ['--', repo_url(repo), target]
+        try:
+            subprocess.run(args, check=True, capture_output=True, text=True, timeout=300,
+                           env={**os.environ, **_GIT_ENV})
+        except FileNotFoundError:
+            raise RuntimeError('Creating a sandbox from a repo needs git installed on this machine') from None
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError(f'Could not clone {repo}: {(error.stderr or "").strip()}') from None
+        return archive_from_directory(target)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def archive_from_directory(directory: str | os.PathLike[str]) -> bytes:
@@ -233,7 +285,8 @@ class _SandboxesResource:
 
     def create(self, *, name: str | None = None, size: str = 'small', archive: bytes | None = None,
                files: Mapping[str, str | bytes] | None = None, directory: str | os.PathLike[str] | None = None,
-               repo: str | None = None, idempotency_key: str | None = None) -> Sandbox:
+               repo: str | None = None, ref: str | None = None,
+               idempotency_key: str | None = None) -> Sandbox:
         payload = archive
         if payload is None:
             if files is not None:
@@ -241,10 +294,10 @@ class _SandboxesResource:
             elif directory is not None:
                 payload = archive_from_directory(directory)
             elif repo is not None:
-                payload = build_tar_gz({'README.md': f'# {repo}\n'})
+                payload = archive_from_repo(repo, ref=ref)
             else:
                 raise ValueError('Provide one of archive, files, directory, or repo')
-        derived = name or (repo.rstrip('/').split('/')[-1] if repo else 'sandbox')
+        derived = name or (repo_name(repo) if repo else 'sandbox')
         clean_name = re.sub(r'[^A-Za-z0-9._ -]', '-', derived)[:100] or 'sandbox'
         headers = {
             'Content-Type': 'application/gzip',

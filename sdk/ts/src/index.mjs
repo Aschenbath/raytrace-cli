@@ -1,8 +1,8 @@
 // @raytrace-cli/sdk — Typed high-level SDK over RayTrace's frozen /v1 API.
 import { randomBytes } from 'node:crypto';
-import { RayTraceClient, RayTraceError, buildTarGz, archiveFromDirectory } from './client.mjs';
+import { RayTraceClient, RayTraceError, buildTarGz, archiveFromDirectory, archiveFromRepo, repoName } from './client.mjs';
 
-export { RayTraceClient, RayTraceError, buildTarGz, archiveFromDirectory };
+export { RayTraceClient, RayTraceError, buildTarGz, archiveFromDirectory, archiveFromRepo };
 
 const TERMINAL_STATES = new Set(['completed', 'cancelled', 'timed_out', 'interrupted']);
 
@@ -117,7 +117,7 @@ class SandboxesResource {
     return found;
   }
 
-  async create({ name = undefined, size = 'small', archive = undefined, files = undefined, dir = undefined, repo = undefined, idempotencyKey = undefined } = {}) {
+  async create({ name = undefined, size = 'small', archive = undefined, files = undefined, dir = undefined, repo = undefined, ref = undefined, idempotencyKey = undefined } = {}) {
     let payload = archive;
     if (!payload) {
       if (files) {
@@ -125,12 +125,12 @@ class SandboxesResource {
       } else if (dir) {
         payload = archiveFromDirectory(dir);
       } else if (repo) {
-        payload = buildTarGz({ 'README.md': `# ${repo}\n` });
+        payload = await archiveFromRepo(repo, { ref });
       } else {
         throw new Error('Provide one of { archive, files, dir, repo } to create a sandbox');
       }
     }
-    const derivedName = name || (repo ? String(repo).split('/').filter(Boolean).pop() : 'sandbox');
+    const derivedName = name || (repo ? repoName(repo) : 'sandbox');
     const cleanName = String(derivedName).replace(/[^A-Za-z0-9._ -]/g, '-').slice(0, 100) || 'sandbox';
     const headers = {
       'Content-Type': 'application/gzip',

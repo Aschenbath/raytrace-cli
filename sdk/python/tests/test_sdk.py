@@ -66,7 +66,7 @@ class PythonSdkTests(unittest.TestCase):
 
         rt = RayTrace(api_key='rtk_test', transport=transport)
         with self.assertRaises(RayTraceError) as ctx:
-            rt.sandboxes.create(size='small', repo='github.com/acme/app')
+            rt.sandboxes.create(name='app', size='small', files={'README.md': '# app\n'})
         self.assertEqual(ctx.exception.status, 402)
         self.assertEqual(ctx.exception.code, 'insufficient_balance')
         self.assertEqual(ctx.exception.topup_url, 'https://raytracer.si/account.html')

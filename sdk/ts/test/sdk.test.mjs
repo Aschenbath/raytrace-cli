@@ -46,11 +46,11 @@ test('full sandbox lifecycle + exec polling + usage + apiKeys', async () => {
   });
 
   const rt = new RayTrace({ apiKey: 'rtk_testkey', baseUrl: 'https://api.example.test', fetchImpl });
-  const sb = await rt.sandboxes.create({ size: 'small', repo: 'github.com/acme/app' });
+  const sb = await rt.sandboxes.create({ name: 'app', size: 'small', files: { 'README.md': '# app\n' } });
   assert.equal(sb.id, sid);
   assert.equal(fetchImpl.calls[0].headers['X-RayTrace-Size'], 'small');
   assert.equal(fetchImpl.calls[0].headers['X-RayTrace-Name'], 'app');
-  assert.ok(gunzipSync(fetchImpl.calls[0].body).toString('utf8').includes('github.com/acme/app'));
+  assert.ok(gunzipSync(fetchImpl.calls[0].body).toString('utf8').includes('# app'));
 
   const r = await sb.exec('npm test', { pollIntervalMs: 1 });
   assert.equal(r.exitCode, 0);

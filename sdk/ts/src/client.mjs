@@ -1,8 +1,11 @@
 // Shared low-level /v1 HTTP client for @raytrace-cli/sdk.
 // Zero runtime dependencies (Node 20+ native fetch + zlib + crypto).
 import { gzipSync } from 'node:zlib';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { join, posix } from 'node:path';
+import { execFile } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import { promisify } from 'node:util';
 
 export const DEFAULT_BASE_URL = 'https://api.raytracer.si';
 
@@ -85,6 +88,48 @@ export function buildTarGz(files) {
   }
   chunks.push(Buffer.alloc(1024, 0));
   return gzipSync(Buffer.concat(chunks));
+}
+
+// git transports a repository URL may use: https and ssh only, so a URL such
+// as ext::<command> can never run a program.
+const GIT_ENV = { GIT_ALLOW_PROTOCOL: 'https:ssh', GIT_TERMINAL_PROMPT: '0' };
+
+/** The clone URL for `repo`: an https or ssh URL as given, `host/owner/name` over https, or GitHub's `owner/name`. */
+export function repoUrl(repo) {
+  const value = String(repo || '').trim();
+  if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(value)) return `https://github.com/${value.replace(/\.git$/, '')}.git`;
+  if (/^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+\/[^\s:]+$/.test(value)) return `https://${value}`;
+  if (/^https:\/\/[^\s]+$/.test(value) || /^ssh:\/\/[^\s]+$/.test(value) || /^[A-Za-z0-9_.-]+@[A-Za-z0-9_.-]+:[^\s]+$/.test(value)) return value;
+  throw new Error(`Unsupported repo "${value}": use an https or ssh URL, or owner/name for GitHub`);
+}
+
+/** The name a repository gives a sandbox: its last path segment, without .git. */
+export function repoName(repo) {
+  return String(repo).replace(/\/+$/, '').split(/[/:]/).filter(Boolean).pop().replace(/\.git$/, '') || 'sandbox';
+}
+
+/**
+ * Clones `repo` (shallow; `ref` is a branch or tag) into a temporary folder and
+ * packs it like archiveFromDirectory, then deletes the clone. Uses the git on
+ * this machine and its credentials, so private repositories work wherever
+ * `git clone` does; it never waits for a password prompt.
+ */
+export async function archiveFromRepo(repo, { ref = undefined } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'raytrace-repo-'));
+  try {
+    const args = ['clone', '--depth', '1', '--quiet'];
+    if (ref) args.push('--branch', String(ref));
+    args.push('--', repoUrl(repo), join(dir, 'repo'));
+    try {
+      await promisify(execFile)('git', args, { env: { ...process.env, ...GIT_ENV }, timeout: 300_000, maxBuffer: 1 << 20 });
+    } catch (error) {
+      if (error.code === 'ENOENT') throw new Error('Creating a sandbox from a repo needs git installed on this machine');
+      throw new Error(`Could not clone ${repo}: ${String(error.stderr || error.message).trim()}`);
+    }
+    return archiveFromDirectory(join(dir, 'repo'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 export function archiveFromDirectory(dirPath) {
