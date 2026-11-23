@@ -25,6 +25,39 @@
 - **A sandbox isn't found:** `raytrace auth status` shows which account you're
   signed in as. Sandboxes belong to the account that made them.
 
+## Git in a connected sandbox
+
+A refusal from RayTrace comes back as git's own error (`remote: ...` or
+`! [remote rejected] ... (...)`). What each one means:
+
+- **`agents here push only to raytrace/<8 characters>/<branch>`:** the push went
+  to a branch outside the sandbox's own. Push to that prefix, such as
+  `git push -u origin HEAD:raytrace/<8 characters>/fix`, and open the pull
+  request from it.
+- **`deleting branches is not allowed from a sandbox`:** delete it on GitHub.
+- **`Attach owner/name to this sandbox to push to it.`** or
+  **`owner/name is private or does not exist: attach it to this sandbox to use it here.`:**
+  run `raytrace sandbox repos <id> --add owner/name`. Check the spelling.
+- **`Install the RayTrace GitHub App on owner/name and connect it on your account page first.`**
+  or **`The RayTrace GitHub App is not installed on owner/name for this organization.`:**
+  an org admin adds the repository to the App's installation on GitHub, or
+  connects GitHub on the [account page](https://raytracer.si/account.html).
+- **`GitHub did not let this sandbox reach owner/name. Is the RayTrace GitHub App still installed on it?`:**
+  the App was removed from the repository, or lost access. Reinstall it, then try again.
+- **`GitHub moved owner/name (it may have been renamed): attach the new name.`:**
+  `raytrace sandbox repos <id> --remove owner/name --add owner/new-name`, then
+  `git remote set-url origin https://github.com/owner/new-name.git` in the sandbox.
+- **`GitHub could not open owner/name just now; try again.`:** GitHub did not
+  answer RayTrace in time; try again in a minute.
+- **`The GitHub connector is not set up on this RayTrace.`:** the RayTrace you use
+  has no GitHub App configured. On a self-hosted one, see its control-plane README.
+- **`Too many git requests from this sandbox; wait a minute.`:** a loop of git
+  commands; wait a minute.
+- **`Git is not available in Playground forks.`:** forks never reach GitHub;
+  push from the sandbox itself.
+- **`sandbox create --connect` said "created, but not connected":** the sandbox
+  is running; fix what it says and run the `Try again:` command it printed.
+
 ## First local sandbox setup
 
 The commands below are for macOS and Linux. On Windows, follow the

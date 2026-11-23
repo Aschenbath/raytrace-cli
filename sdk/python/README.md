@@ -50,6 +50,32 @@ sandbox.stop()
 
 Sizes are `small`, `medium` and `large`.
 
+## Connect GitHub
+
+A sandbox can clone, fetch and push a GitHub repository without any GitHub
+key inside it: its git goes through RayTrace, which opens the repositories
+attached to it with your organization's RayTrace GitHub App. First, an org
+admin installs the App on the repositories and connects it on the
+[account page](https://raytracer.si/account.html).
+
+```python
+sandbox = rt.sandboxes.create(repo='acme/app', connect=True)
+sandbox.git   # {'repo': 'acme/app', 'branch': 'raytrace/1a2b3c4d/work', ...}
+sandbox.exec('git commit -am "Fix" && git push -u origin HEAD')
+```
+
+| Call | What it does |
+| --- | --- |
+| `rt.sandboxes.create(repo=, connect=True)` | Uploads, then attaches `repo` and makes `/workspace` a clone of it on its work branch. With `directory=` or `files=`, those are uploaded and `repo` is what it is connected to |
+| `sandbox.connect_repo(repo, ref=, commit=)` | The same for a sandbox that exists |
+| `sandbox.repos.list()` / `sandbox.repos.set([...])` | The repositories its git may open; `set` replaces the list, `[]` takes them all off |
+
+An agent in the sandbox pushes only to branches under `raytrace/<8 characters
+of the sandbox id>/`; anything else, including `main`, is refused, and no branch
+can be deleted. Every clone, fetch and push is recorded with the sandbox's evidence.
+If connecting fails, the sandbox was still created: the `RayTraceError` says so
+and carries it as `error.sandbox`.
+
 ## Usage and keys
 
 ```python

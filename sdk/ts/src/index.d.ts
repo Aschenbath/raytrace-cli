@@ -39,6 +39,14 @@ export interface CreateSandboxOptions {
   repo?: string;
   /** With `repo`: the branch or tag to clone (default: the repository's default branch). */
   ref?: string;
+  /**
+   * With `repo` as a GitHub repository: after the upload, attach it and make
+   * /workspace a clone of it on the branch the agent may push to
+   * (`raytrace/<id[4:12]>/work`). Needs the RayTrace GitHub App installed on
+   * it and connected on your account page. With `dir` or `files`, those are
+   * what is uploaded and `repo` is only what it is connected to.
+   */
+  connect?: boolean;
   idempotencyKey?: string;
 }
 
@@ -99,13 +107,33 @@ export interface ApiKeyCreated extends ApiKeySummary {
   key: string;
 }
 
+export interface ConnectedRepo {
+  /** owner/name */
+  repo: string;
+  /** The branch /workspace is on, under the only prefix the sandbox may push to. */
+  branch: string;
+  output: string;
+}
+
+export interface SandboxRepos {
+  /** The GitHub repositories (owner/name) this sandbox's git may open. */
+  list(): Promise<string[]>;
+  /** Replaces the whole list; [] takes them all off. Each must be one the org's GitHub App is installed on. */
+  set(repos: string[]): Promise<string[]>;
+}
+
 export class Sandbox {
   readonly id: string;
+  readonly repos: SandboxRepos;
+  /** Set by create({ connect: true }). */
+  git?: ConnectedRepo;
   info: SandboxSummary;
   readonly status: string;
   readonly size: SandboxSize;
   readonly name: string;
   exec(command: string, options?: ExecOptions): Promise<ExecResult>;
+  /** Attaches a GitHub repository and makes /workspace a clone of it (see CreateSandboxOptions.connect). */
+  connectRepo(repo: string, options?: { ref?: string; commit?: string; timeoutSeconds?: number }): Promise<ConnectedRepo>;
   start(options?: { size?: SandboxSize; waitForRestore?: boolean; pollIntervalMs?: number }): Promise<SandboxSummary>;
   stop(): Promise<SandboxSummary>;
   keepAlive(minutes: number): Promise<Record<string, unknown>>;
@@ -138,4 +166,10 @@ export class RayTrace {
 export function buildTarGz(files: Record<string, string | Uint8Array>): Buffer;
 export function archiveFromDirectory(dirPath: string): Buffer;
 export function archiveFromRepo(repo: string, options?: { ref?: string }): Promise<Buffer>;
+/** owner/name for owner/name or a github.com https or ssh URL; null for anything else. */
+export function githubRepo(repo: string): string | null;
+/** The branch a connected sandbox works on: raytrace/<id[4:12]>/work. */
+export function workBranch(sandboxId: string): string;
+/** The shell commands connectRepo runs in the sandbox. */
+export function connectScript(options: { repo: string; sandboxId: string; ref?: string; commit?: string; dir?: string }): string;
 export default RayTrace;

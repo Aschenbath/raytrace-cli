@@ -53,9 +53,9 @@ test('unrelated commands receive a short error without a suggestion', () => {
 test('a missing sandbox subcommand shows only sandbox usage', () => {
   const output = run('sandbox');
   assert.match(output, /^Usage: raytrace sandbox <command>/);
-  for (const command of ['create', 'list', 'shell', 'start', 'destroy', 'files']) {
+  for (const command of ['create', 'list', 'shell', 'start', 'destroy', 'files', 'repos']) {
     assert.ok(output.includes(`raytrace sandbox ${command}`), command);
   }
   assert.doesNotMatch(output, /raytrace setup|raytrace auth|Unknown sandbox command/);
-  assert.ok(output.split('\n').length < 15);
+  assert.ok(output.split('\n').length < 20);
 });

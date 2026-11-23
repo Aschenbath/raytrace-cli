@@ -41,6 +41,52 @@ keys (`.pem`, `.key`, `.p12`, `.pfx`) and common credential files (`.npmrc`,
 and any sign-in made inside, along with the recorded traces. To keep the traces,
 use `--keep-traces` (paid plans).
 
+## Connect GitHub
+
+A cloud sandbox can clone, fetch and push GitHub repositories with no GitHub
+key inside it. Its git goes to github.com through RayTrace, which opens the
+repositories attached to that sandbox with your organization's RayTrace GitHub
+App, then records each clone, fetch and push with the sandbox's evidence.
+
+Once per organization, an org admin installs the App and connects it: on the
+[account page](https://raytracer.si/account.html), **Connect GitHub**, choose the
+repositories on GitHub, then confirm with GitHub's sign-in.
+
+Then, from your repository:
+
+```sh
+raytrace sandbox create --connect               # its GitHub origin
+raytrace sandbox create --connect --repo acme/app
+```
+
+The sandbox gets your files as usual, then `/workspace` becomes a clone of the
+repository on the branch `raytrace/<8 characters of the sandbox id>/work`,
+lined up with the commit you have checked out when GitHub has it (else the
+branch, else the default branch). Changes you had not committed show as
+changes there.
+
+What the agent may do:
+
+- **Fetch and clone** the attached repositories, and any public one.
+- **Push** to branches under `raytrace/<8 characters of the sandbox id>/` in an
+  attached repository. A push to any other branch, `main` included, is refused,
+  and no branch can be deleted. Open the pull request yourself.
+- Nothing in a Playground fork: git through RayTrace is off there.
+
+To change what a sandbox may open:
+
+```sh
+raytrace sandbox repos <id>                          # list
+raytrace sandbox repos <id> --add acme/lib           # attach (the App must be on it)
+raytrace sandbox repos <id> --remove acme/lib        # take off; it stops working within a minute
+raytrace sandbox repos <id> --add acme/app --connect # attach and make /workspace a clone of it
+```
+
+The SDKs do the same: `create({ repo, connect: true })` and `sandbox.repos`
+([TypeScript](../sdk/ts/README.md#connect-github),
+[Python](../sdk/python/README.md#connect-github)). When git is refused, see
+[troubleshooting](troubleshooting.md#git-in-a-connected-sandbox).
+
 ## Beta invites
 
 If RayTrace gave you a beta code, sign in, redeem it, then create your sandbox:
