@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "raytrace-sdk"
+version = "0.1.0"
+description = "Python SDK for RayTrace cloud sandboxes: create, run commands, stop, start and destroy over the /v1 API"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = []
+keywords = ["raytrace", "sandbox", "coding-agents", "sdk"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://raytracer.si"
+Source = "https://github.com/Godcreatebugs/raytrace-cli/tree/main/sdk/python"
+Issues = "https://github.com/Godcreatebugs/raytrace-cli/issues"
+
+[tool.setuptools.packages.find]
+include = ["raytrace_sdk*"]

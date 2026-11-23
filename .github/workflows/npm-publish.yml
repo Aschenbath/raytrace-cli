@@ -73,7 +73,9 @@ jobs:
 
   publish:
     needs: prepare-release
-    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease))
+    # sdk-v* releases belong to sdk-publish.yml; the jobs after this one need it
+    # to succeed, so skipping it here skips the whole CLI release.
+    if: always() && !cancelled() && github.repository == 'Godcreatebugs/raytrace-cli' && !startsWith(github.event.release.tag_name || inputs.tag, 'sdk-v') && (github.event_name == 'workflow_dispatch' || (github.event_name == 'release' && !github.event.release.prerelease))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
