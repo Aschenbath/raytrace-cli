@@ -1,0 +1,185 @@
+# The SDKs in sdk/: @raytrace-cli/sdk on npm and raytrace-sdk on PyPI.
+# Released apart from the CLI, by a GitHub release whose tag is sdk-vX.Y.Z
+# (npm-publish.yml ignores those tags). Both registries use trusted
+# publishing, so no token is stored anywhere:
+#   npm:  package @raytrace-cli/sdk -> trusted publisher Godcreatebugs/raytrace-cli,
+#         workflow sdk-publish.yml, environment npm
+#   PyPI: project raytrace-sdk -> trusted publisher Godcreatebugs/raytrace-cli,
+#         workflow sdk-publish.yml, environment pypi
+# Pull requests that touch sdk/ only run the tests.
+name: Publish SDKs
+
+on:
+  pull_request:
+    paths: ['sdk/**', '.github/workflows/sdk-publish.yml']
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing SDK release tag to publish (for example sdk-v0.1.0). A registry that already has that version is skipped.'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sdk-publish-${{ github.event.release.tag_name || inputs.tag || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    if: github.event_name == 'pull_request' || startsWith(github.event.release.tag_name || inputs.tag, 'sdk-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG && format('refs/tags/{0}', env.RELEASE_TAG) || '' }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Both packages carry the same version, and a release tag must name it.
+      - name: Check versions
+        id: version
+        run: |
+          set -euo pipefail
+          npm_version="$(node -p "require('./sdk/ts/package.json').version")"
+          py_version="$(python3 -c "import tomllib; print(tomllib.load(open('sdk/python/pyproject.toml', 'rb'))['project']['version'])")"
+          if [ "$npm_version" != "$py_version" ]; then
+            echo "sdk/ts is $npm_version but sdk/python is $py_version; bump both together."
+            exit 1
+          fi
+          if [[ ! "$npm_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Refusing non-stable version $npm_version."
+            exit 1
+          fi
+          if [ -n "${RELEASE_TAG:-}" ] && [ "$RELEASE_TAG" != "sdk-v$npm_version" ]; then
+            echo "Tag $RELEASE_TAG does not match SDK version $npm_version."
+            exit 1
+          fi
+          echo "version=$npm_version" >> "$GITHUB_OUTPUT"
+
+      - name: Test the TypeScript SDK
+        working-directory: sdk/ts
+        run: npm test
+
+      - name: Test the Python SDK
+        working-directory: sdk/python
+        run: |
+          python3 -m pip install --quiet pytest
+          python3 -m pytest -q tests
+
+  npm:
+    name: Publish to npm
+    needs: test
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name != 'pull_request' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/@raytrace-cli/sdk
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      VERSION: ${{ needs.test.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Ensure npm supports trusted publishing
+        run: npm install --global npm@11
+
+      - name: See if this version is already on npm
+        id: exists
+        run: |
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://registry.npmjs.org/@raytrace-cli%2Fsdk/${VERSION}")"
+          if [ "$code" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "@raytrace-cli/sdk ${VERSION} is already on npm; skipped." >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$code" = "404" ]; then
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "npm registry check failed: HTTP $code"
+            exit 1
+          fi
+
+      # Authentication uses OIDC (trusted publishing), which also attaches
+      # provenance. No NPM_TOKEN secret is needed.
+      - name: Publish
+        if: steps.exists.outputs.exists == 'false'
+        working-directory: sdk/ts
+        run: npm publish --access public
+
+  pypi:
+    name: Publish to PyPI
+    needs: test
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name != 'pull_request' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/project/raytrace-sdk/
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      VERSION: ${{ needs.test.outputs.version }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: See if this version is already on PyPI
+        id: exists
+        run: |
+          code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "https://pypi.org/pypi/raytrace-sdk/${VERSION}/json")"
+          if [ "$code" = "200" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "raytrace-sdk ${VERSION} is already on PyPI; skipped." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build the sdist and wheel
+        if: steps.exists.outputs.exists == 'false'
+        working-directory: sdk/python
+        run: |
+          python3 -m pip install --quiet build
+          python3 -m build --outdir ../../dist
+
+      - name: Publish
+        if: steps.exists.outputs.exists == 'false'
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+        with:
+          packages-dir: dist
+          attestations: true
