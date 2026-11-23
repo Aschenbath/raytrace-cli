@@ -33,6 +33,9 @@ Cloud sandboxes:
   raytrace sandbox create [--name <name>] [--size small|medium|large]
                                             upload this Git repository to a new sandbox
                                             (up to 200 MiB, 25 MiB a file, 20,000 files; default: small)
+  raytrace sandbox repos [id] [--add owner/name] [--remove owner/name] [--connect]
+                                            the GitHub repositories its git may open; --connect
+                                            with one --add also makes /workspace a clone of it
   raytrace connect [id] [--claude|--codex]  a terminal in it; with one sandbox the id is
                                             optional (same as: raytrace sandbox shell [id]);
                                             --claude or --codex starts that agent in it at
@@ -221,6 +224,9 @@ if (command === 'sandbox') {
       restrict: { type: 'string', multiple: true },
       report: { type: 'string', multiple: true },
       clear: { type: 'string', multiple: true },
+      connect: { type: 'boolean' },
+      add: { type: 'string', multiple: true },
+      remove: { type: 'string', multiple: true },
     } });
   } catch (error) { console.error(`${error.message}\n\nRun \`raytrace help\` for usage.`); process.exit(2); }
   const [sub, id] = parsed.positionals;
@@ -236,6 +242,7 @@ if (command === 'sandbox') {
     'keep-alive': () => sandbox.keepAlive(id, parsed.values),
     destroy: () => sandbox.destroy(id, parsed.values),
     files: () => sandbox.files(id, parsed.values),
+    repos: () => sandbox.repos(id, parsed.values),
   };
   const action = actions[sub];
   if (!sub) { console.error(SANDBOX_HELP); process.exit(2); }

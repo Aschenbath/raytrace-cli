@@ -9,6 +9,7 @@
 // login` token; RAYTRACE_API_KEY overrides it for a server running without
 // accounts (development).
 import { spawn, spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -19,6 +20,7 @@ import { betaEnds, betaStatus, formatCreditDeadline } from './beta.mjs';
 import { ask, confirm, interactive } from './prompt.mjs';
 import * as local from './local-sandbox.mjs';
 import { AGENTS } from './agents.mjs';
+import { ACCOUNT_URL, connectScript, githubRepo, localRepo, pushPrefix } from './github.mjs';
 
 const say = (line = '') => console.log(line);
 // What one project upload may be. RayTrace's API holds the dashboard's folder
@@ -180,6 +182,93 @@ export function upload(archive, name, useCredit, size = null) {
 
 /** The API refused the credit: 409 already used on another sandbox, 410 expired. */
 export const isCreditRefusal = (error) => error instanceof ApiError && [409, 410].includes(error.status);
+
+// ------------------------------------------------------- GitHub (src/github.mjs)
+
+const JSON_HEADERS = { 'content-type': 'application/json' };
+
+/** An API refusal about repositories, worded for this command line. */
+function repoError(error) {
+  if (!(error instanceof ApiError)) return error;
+  if (error.status === 404 && error.message === 'Not found') return new Error('This RayTrace server does not support GitHub repositories yet.');
+  if (/account page/.test(error.message)) return new ApiError(`${error.message}\nAccount page: ${ACCOUNT_URL}`, { status: error.status, data: error.data });
+  return error;
+}
+
+async function attachedRepos(id) {
+  try { return (await call('GET', `/v1/sandboxes/${id}/repos`)).repos || []; } catch (error) { throw repoError(error); }
+}
+
+async function setRepos(id, repos) {
+  try { return (await call('PUT', `/v1/sandboxes/${id}/repos`, { body: JSON.stringify({ repos }), headers: JSON_HEADERS })).repos || []; }
+  catch (error) { throw repoError(error); }
+}
+
+const COMMAND_DONE = new Set(['completed', 'cancelled', 'timed_out', 'interrupted']);
+const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
+
+/** Runs `command` in a cloud sandbox and waits for its result (the command API the SDKs' exec uses). */
+export async function runInSandbox(id, command, { timeoutSeconds = 300, pollMs = 1000 } = {}) {
+  const body = JSON.stringify({ command, timeout_seconds: timeoutSeconds, request_id: `req_${randomBytes(12).toString('hex')}` });
+  let job = await call('POST', `/v1/sandboxes/${id}/commands`, { body, headers: JSON_HEADERS });
+  // An interrupted command whose host could not be reached may still be running: its answer is not final yet.
+  while (!COMMAND_DONE.has(job.state) || job.recovery_pending) {
+    await sleep(pollMs);
+    job = await call('GET', `/v1/sandboxes/${id}/commands/${job.command_id}`);
+  }
+  return job;
+}
+
+/** The commit and branch to line a sandbox up with, when it is connected to the repository this command runs in. */
+function hereFor(repo) {
+  const root = repoRoot();
+  const here = root ? localRepo(root) : {};
+  return here.repo && here.repo.toLowerCase() === repo.toLowerCase() ? { commit: here.commit, ref: here.ref } : {};
+}
+
+/** Attaches `repo` to a cloud sandbox (keeping what is attached), then makes its /workspace a clone of it.
+ * Says what was done: "/workspace ... is a clone of ... on branch ...", or why it was left as it was. */
+export async function connectRepo(id, repo, { ref, commit } = {}) {
+  const script = connectScript({ repo, sandboxId: id, ref, commit });
+  const attached = await attachedRepos(id);
+  if (!attached.some((other) => other.toLowerCase() === repo.toLowerCase())) await setRepos(id, [...attached, repo]);
+  const job = await runInSandbox(id, script);
+  if (job.exit_code !== 0) throw new Error(String(job.stderr || job.stdout || `the setup command ended ${job.state}`).trim());
+  const branch = String(job.stdout ?? '').match(/on branch (\S+)\./)?.[1];
+  return branch ? `/workspace in ${id} is a clone of ${repo} on branch ${branch}.`
+    : `${repo} is attached to ${id}. ${String(job.stderr ?? '').trim().replace(/^RayTrace: /, '')}`.trim();
+}
+
+const pushRule = (id) => `Agents in it push only to ${pushPrefix(id)}<branch>; any other branch, main included, is refused.`;
+
+/** `raytrace sandbox repos [id] [--add owner/name ...] [--remove owner/name ...] [--connect]` */
+export async function repos(id, flags = {}) {
+  if (flags.local || (id && local.isLocal(id))) throw new Error('GitHub repositories attach to cloud sandboxes only.');
+  const names = (given = []) => given.map((repo) => githubRepo(repo) ?? (() => { throw new Error(`Not a GitHub repository: ${repo} (use owner/name)`); })());
+  const add = names(flags.add), remove = names(flags.remove);
+  if (flags.connect && (add.length !== 1 || remove.length)) {
+    throw new Error('--connect makes /workspace a clone of one repository: give it exactly one --add owner/name.');
+  }
+  const targetId = await pickId(id);
+  let list;
+  if (flags.connect) {
+    say(await connectRepo(targetId, add[0], hereFor(add[0])));
+    list = await attachedRepos(targetId);
+  } else if (add.length || remove.length) {
+    const same = (a) => (b) => a.toLowerCase() === b.toLowerCase();
+    const current = await attachedRepos(targetId);
+    list = await setRepos(targetId, [...current.filter((repo) => !remove.some(same(repo))), ...add.filter((repo) => !current.some(same(repo)))]);
+  } else {
+    list = await attachedRepos(targetId);
+  }
+  if (!list.length) {
+    say(`No GitHub repositories attached to ${targetId}. Attach one: raytrace sandbox repos ${targetId} --add owner/name`);
+    return;
+  }
+  say(`GitHub repositories ${targetId} may open:`);
+  for (const repo of list) say(`  ${repo}`);
+  say(pushRule(targetId));
+}
 
 export async function create(flags) {
   const root = repoRoot();
