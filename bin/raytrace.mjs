@@ -33,6 +33,11 @@ Cloud sandboxes:
   raytrace sandbox create [--name <name>] [--size small|medium|large]
                                             upload this Git repository to a new sandbox
                                             (up to 200 MiB, 25 MiB a file, 20,000 files; default: small)
+  raytrace sandbox create --connect [--repo owner/name]
+                                            the same, then make it a clone of the repository's
+                                            GitHub origin (or --repo) that its agent can fetch
+                                            and push to raytrace/<id>/... branches; an org admin
+                                            connects GitHub on the account page first
   raytrace sandbox repos [id] [--add owner/name] [--remove owner/name] [--connect]
                                             the GitHub repositories its git may open; --connect
                                             with one --add also makes /workspace a clone of it
@@ -225,6 +230,7 @@ if (command === 'sandbox') {
       report: { type: 'string', multiple: true },
       clear: { type: 'string', multiple: true },
       connect: { type: 'boolean' },
+      repo: { type: 'string' },
       add: { type: 'string', multiple: true },
       remove: { type: 'string', multiple: true },
     } });

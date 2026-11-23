@@ -271,9 +271,21 @@ export async function repos(id, flags = {}) {
 }
 
 export async function create(flags) {
+  if (flags.repo && !flags.connect) throw new Error('--repo names the GitHub repository to connect to: use it with --connect.');
+  if (flags.connect && flags.local) throw new Error('GitHub repositories connect to cloud sandboxes only.');
   const root = repoRoot();
   if (!root) throw new Error('Run this from inside a Git repository.');
   const name = flags.name || basename(root);
+  // Which GitHub repository to connect to, worked out before anything is uploaded.
+  let connecting = null;
+  if (flags.connect) {
+    const repo = flags.repo ? githubRepo(flags.repo) : localRepo(root).repo;
+    if (!repo) {
+      throw new Error(flags.repo ? `Not a GitHub repository: ${flags.repo} (use owner/name)`
+        : "This repository's origin is not on GitHub. Name the one to connect to: --repo owner/name");
+    }
+    connecting = { repo, ...hereFor(repo) };
+  }
   const requestedSize = flags.local ? null : validateSize(flags.size);
   // What the machine lacks is said before the project is read, and Lima fetched if agreed.
   const localName = flags.local ? local.sandboxName(flags, root) : null;
@@ -319,8 +331,21 @@ export async function create(flags) {
   }
   say(box.transcripts ? 'Claude Code sessions in it are recorded.'
     : `Claude Code transcripts are off: ${box.transcripts_off}. Commands are still recorded.`);
+  let notConnected = null;
+  if (connecting) {
+    say(`Connecting it to GitHub: ${connecting.repo}...`);
+    try {
+      say(`${await connectRepo(box.id, connecting.repo, connecting)} ${pushRule(box.id)}`);
+    } catch (error) {
+      notConnected = error;
+    }
+  }
   say('The first time, Claude Code (or Codex) asks you to sign in inside the sandbox: use your own account.');
   say(`Open it:  raytrace connect ${box.id}`);
+  if (notConnected) {
+    throw new Error(`${box.id} was created, but not connected to GitHub: ${notConnected.message}\n`
+      + `Try again: raytrace sandbox repos ${box.id} --add ${connecting.repo} --connect`);
+  }
 }
 
 export async function list(flags = {}) {

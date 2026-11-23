@@ -68,6 +68,63 @@ function raytrace(t, cwd, url, ...args) {
 
 const routes = (calls) => calls.map((call) => `${call.method} ${call.path}`).filter((route) => !route.includes('/beta/'));
 
+test('sandbox create --connect uploads, attaches the origin, and lines the sandbox up with this commit', async (t) => {
+  const { root, head } = project(t);
+  const state = { repos: [], command: { state: 'completed', exit_code: 0, stdout: CONNECTED, stderr: '' } };
+  const api = await fakeApi(t, state);
+  const done = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect');
+  assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(routes(api.calls), ['POST /v1/sandboxes', `GET /v1/sandboxes/${SID}/repos`, `PUT /v1/sandboxes/${SID}/repos`, `POST /v1/sandboxes/${SID}/commands`]);
+  assert.deepEqual(state.repos, ['acme/app']);
+  const run = api.calls.find((call) => call.path.endsWith('/commands')).body;
+  assert.equal(run.command, connectScript({ repo: 'acme/app', sandboxId: SID, commit: head, ref: 'main' }));
+  assert.match(done.stdout, /Connecting it to GitHub: acme\/app\.\.\./);
+  assert.match(done.stdout, /\/workspace in rtp-\S+ is a clone of acme\/app on branch raytrace\/01234567\/work\. Agents in it push only to raytrace\/01234567\/<branch>; any other branch, main included, is refused\./);
+});
+
+test('sandbox create --connect --repo connects another repository, at its default branch', async (t) => {
+  const { root } = project(t);
+  const state = { repos: [], command: { state: 'completed', exit_code: 0, stdout: CONNECTED.replace('acme/app', 'acme/other'), stderr: '' } };
+  const api = await fakeApi(t, state);
+  const done = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect', '--repo', 'https://github.com/acme/other');
+  assert.equal(done.code, 0, done.stderr);
+  assert.deepEqual(state.repos, ['acme/other']);
+  assert.equal(api.calls.find((call) => call.path.endsWith('/commands')).body.command, connectScript({ repo: 'acme/other', sandboxId: SID }));
+});
+
+test('sandbox create --connect refuses before uploading when there is no GitHub repository to connect', async (t) => {
+  const { root } = project(t, 'https://gitlab.com/acme/app.git');
+  const api = await fakeApi(t, { repos: [] });
+  const done = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect');
+  assert.equal(done.code, 1);
+  assert.match(done.stderr, /origin is not on GitHub\. Name the one to connect to: --repo owner\/name/);
+  const bad = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect', '--repo', 'gitlab.com/acme/app');
+  assert.match(bad.stderr, /Not a GitHub repository: gitlab\.com\/acme\/app/);
+  const local = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect', '--local');
+  assert.match(local.stderr, /cloud sandboxes only/);
+  assert.deepEqual(routes(api.calls), []);
+});
+
+test('a refused connect says the sandbox exists, how to open it, and how to try again', async (t) => {
+  const { root } = project(t);
+  const refusal = 'Install the RayTrace GitHub App on acme/app and connect it on your account page first.';
+  const api = await fakeApi(t, { repos: [], refuse: refusal });
+  const done = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect');
+  assert.equal(done.code, 1);
+  assert.match(done.stdout, new RegExp(`Open it:  raytrace connect ${SID}`));
+  assert.ok(done.stderr.includes(`${SID} was created, but not connected to GitHub: ${refusal}\nAccount page: https://raytracer.si/account.html`), done.stderr);
+  assert.ok(done.stderr.includes(`Try again: raytrace sandbox repos ${SID} --add acme/app --connect`), done.stderr);
+  assert.ok(!api.calls.some((call) => call.path.endsWith('/commands')));
+});
+
+test('a failed setup command is reported with what git said', async (t) => {
+  const { root } = project(t);
+  const api = await fakeApi(t, { repos: [], command: { state: 'completed', exit_code: 128, stdout: '', stderr: 'fatal: GitHub did not let this sandbox reach acme/app.\n' } });
+  const done = await raytrace(t, root, api.url, 'sandbox', 'create', '--connect');
+  assert.equal(done.code, 1);
+  assert.match(done.stderr, /was created, but not connected to GitHub: fatal: GitHub did not let this sandbox reach acme\/app\.\n/);
+});
+
 test('sandbox repos lists, adds and removes, keeping the rest', async (t) => {
   const { root } = project(t);
   const state = { repos: ['acme/app'] };
