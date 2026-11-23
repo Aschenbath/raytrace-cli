@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connectScript, githubRepo, workBranch } from '../src/client.mjs';
+import { RayTrace, RayTraceError, Sandbox } from '../src/index.mjs';
 
 const SID = 'rtp-' + '0123456789abcdef'.repeat(2);
 
@@ -111,4 +112,41 @@ test('connectScript stops at the first failure: an unknown ref', { skip: !hasGit
   // No work branch was made, and the uploaded files are untouched.
   assert.notEqual(spawnSync('git', ['rev-parse', '--verify', 'raytrace/01234567/work'], { cwd: sandbox }).status, 0);
   assert.equal(readFileSync(join(sandbox, 'app.js'), 'utf8'), 'two\n');
+});
+
+function api(routes) {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    const u = new URL(url);
+    const call = { method: init.method || 'GET', path: u.pathname, body: init.body ? JSON.parse(init.body) : null };
+    calls.push(call);
+    const [status, body] = (routes[`${call.method} ${call.path}`] || (() => [404, { error: 'Not found' }]))(call, calls);
+    return new Response(JSON.stringify(body), { status });
+  };
+  return { rt: new RayTrace({ apiKey: 'k', baseUrl: 'https://api.test', fetchImpl }), calls };
+}
+
+test('sandbox.repos lists and replaces the attached GitHub repositories', async () => {
+  const { rt, calls } = api({
+    'GET /v1/sandboxes': () => [200, [{ id: SID, status: 'running' }]],
+    [`GET /v1/sandboxes/${SID}/repos`]: () => [200, { id: SID, repos: ['acme/app'] }],
+    [`PUT /v1/sandboxes/${SID}/repos`]: (call) => [200, { id: SID, repos: call.body.repos }],
+  });
+  const box = await rt.sandboxes.get(SID);
+  assert.deepEqual(await box.repos.list(), ['acme/app']);
+  assert.deepEqual(await box.repos.set(['https://github.com/acme/app.git', 'acme/lib']), ['acme/app', 'acme/lib']);
+  assert.deepEqual(calls.at(-1), { method: 'PUT', path: `/v1/sandboxes/${SID}/repos`, body: { repos: ['acme/app', 'acme/lib'] } });
+  assert.deepEqual(await box.repos.set([]), []);
+  // Checked here before anything is sent.
+  const sent = calls.length;
+  await assert.rejects(box.repos.set(['gitlab.com/acme/app']), /Not a GitHub repository/);
+  await assert.rejects(box.repos.set('acme/app'), /list/);
+  assert.equal(calls.length, sent);
+});
+
+test("sandbox.repos.set passes on the API's refusal as it is", async () => {
+  const message = 'Install the RayTrace GitHub App on acme/app and connect it on your account page first.';
+  const { rt } = api({ [`PUT /v1/sandboxes/${SID}/repos`]: () => [400, { error: message }] });
+  const box = new Sandbox(rt.client, { id: SID });
+  await assert.rejects(box.repos.set(['acme/app']), (error) => error instanceof RayTraceError && error.status === 400 && error.message === message);
 });
