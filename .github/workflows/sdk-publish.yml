@@ -1,17 +1,26 @@
 # The SDKs in sdk/: @raytrace-cli/sdk on npm and raytrace-sdk on PyPI.
-# Released apart from the CLI, by a GitHub release whose tag is sdk-vX.Y.Z
-# (npm-publish.yml ignores those tags). Both registries use trusted
-# publishing, so no token is stored anywhere:
+# Released apart from the CLI, under sdk-vX.Y.Z tags (npm-publish.yml ignores
+# those). A pull request merged into main that changes sdk/ releases the SDKs
+# automatically: a patch by default, or per its release:minor, release:major
+# or release:skip label, the same labels the CLI uses. A GitHub release
+# published by hand with an sdk-v tag, or a dispatch with one, publishes too.
+# Both registries use trusted publishing, so no token is stored anywhere:
 #   npm:  package @raytrace-cli/sdk -> trusted publisher Godcreatebugs/raytrace-cli,
 #         workflow sdk-publish.yml, environment npm
 #   PyPI: project raytrace-sdk -> trusted publisher Godcreatebugs/raytrace-cli,
 #         workflow sdk-publish.yml, environment pypi
-# Pull requests that touch sdk/ only run the tests.
+# Pull requests that touch sdk/ run the tests before they merge.
 name: Publish SDKs
 
 on:
   pull_request:
-    paths: ['sdk/**', '.github/workflows/sdk-publish.yml']
+    paths: ['sdk/**', '.github/workflows/sdk-publish.yml', '.github/scripts/prepare-sdk-release.mjs']
+  # Use the trusted base-branch workflow for merged PRs, including forks.
+  # Only main is checked out; unmerged PR code is never executed.
+  pull_request_target:
+    branches: [main]
+    types: [closed]
+    paths: ['sdk/**']
   release:
     types: [published]
   workflow_dispatch:
@@ -29,6 +38,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-release:
+    if: github.repository == 'Godcreatebugs/raytrace-cli' && github.event_name == 'pull_request_target' && github.event.pull_request.merged
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Configure release commit author
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Make the SDK version commit and push its sdk-v tag
+        id: release
+        run: node .github/scripts/prepare-sdk-release.mjs
+
+      - name: Create the GitHub release and start the publish
+        if: steps.release.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --latest=false --title "RayTrace SDK ${RELEASE_TAG#sdk-v}" --generate-notes
+          fi
+          # npm's trusted publishing refuses a run started by a pull request
+          # event, and a release made with GITHUB_TOKEN starts no workflow, so
+          # the publish is a dispatched second run of this workflow.
+          gh workflow run sdk-publish.yml --ref main -f tag="$RELEASE_TAG"
+
   test:
     if: github.event_name == 'pull_request' || startsWith(github.event.release.tag_name || inputs.tag, 'sdk-v')
     runs-on: ubuntu-latest

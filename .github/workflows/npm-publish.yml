@@ -30,6 +30,7 @@ jobs:
     permissions:
       contents: write
       actions: write
+      pull-requests: read
     outputs:
       tag: ${{ steps.release.outputs.tag }}
     steps:
@@ -51,8 +52,26 @@ jobs:
       # The release is a tag only: the version commit sits on top of main and is
       # never pushed to it, because main takes changes through pull requests
       # alone. The next version counts from the highest vX.Y.Z tag.
+      # A PR that changes only the SDKs (sdk/ and their release files) is
+      # released by sdk-publish.yml, not as a new CLI version.
+      - name: See if this PR changes the CLI
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          files="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')"
+          if [ -n "$files" ] && ! grep -qvE '^(sdk/|\.github/workflows/sdk-publish\.yml$|\.github/scripts/prepare-sdk-release\.mjs$)' <<<"$files"; then
+            echo "cli=false" >> "$GITHUB_OUTPUT"
+            echo "PR #${PR_NUMBER} changes only the SDKs; no CLI release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "cli=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Make the version commit and push its release tag
         id: release
+        if: steps.scope.outputs.cli == 'true'
         run: node .github/scripts/prepare-npm-release.mjs
 
       - name: Create GitHub Release and build pip wheels
