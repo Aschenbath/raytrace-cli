@@ -126,6 +126,8 @@ then say "create a local sandbox and connect this repo".
 | **Disk and memory** | the first setup downloads about 1 GB; the VM uses 4 GiB of memory while it runs |
 
 `raytrace doctor` checks all of this and says how to fix anything missing.
+For slow downloads, port conflicts, Linux KVM access or an interrupted setup,
+follow [first local sandbox setup troubleshooting](docs/troubleshooting.md#first-local-sandbox-setup).
 
 ### Day to day
 
