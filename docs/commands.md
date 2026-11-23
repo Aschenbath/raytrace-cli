@@ -7,6 +7,8 @@ shows these commands in the terminal.
 |---|---|
 | `raytrace mcp` | the MCP server for your editor; see [Set up in your editor](mcp.md) |
 | `raytrace sandbox create [--local] [--name <name>]` | copy this Git repository into a new sandbox, in the cloud or (`--local`) on this machine |
+| `raytrace sandbox create --connect [--repo owner/name]` | the same in the cloud, then make it a clone of the repository's GitHub origin (or `--repo`) its agent can push to; see [Connect GitHub](cloud.md#connect-github) |
+| `raytrace sandbox repos [id] [--add owner/name] [--remove owner/name] [--connect]` | the GitHub repositories a cloud sandbox may open; `--connect` with one `--add` also makes `/workspace` a clone of it |
 | `raytrace connect [id or name] [--claude \| --codex]` | open a terminal in a sandbox, optionally with an agent running in it |
 | `raytrace sandbox list [--local]` | your sandboxes |
 | `raytrace sandbox start\|stop <id or name>` | start or stop one; stopping keeps its files |

@@ -266,6 +266,11 @@ The upload is the files Git would track (including new files it doesn't ignore),
 files, private keys and common credential files. Check for secrets inside other
 files before you upload.
 
+To let the agent in it fetch and push your GitHub repository (to its own
+`raytrace/...` branches only, with no GitHub key in the sandbox), use
+`raytrace sandbox create --connect`; an org admin connects GitHub once first.
+See [Connect GitHub](docs/cloud.md#connect-github).
+
 Limits, beta invites, and what happens when you destroy a cloud sandbox are in
 [docs/cloud.md](docs/cloud.md).
 

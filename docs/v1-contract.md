@@ -40,6 +40,8 @@ All non-2xx responses return JSON:
 | `POST /v1/sandboxes/{id}/stop` | — | `200 { id, status: "exited" }` |
 | `POST /v1/sandboxes/{id}/keep-alive` | JSON `{ "minutes": 0..240 }` | `200 ActivityState` |
 | `DELETE /v1/sandboxes/{id}?keep_traces=0\|1` | — | `200 { id, status: "deleted", ... }` |
+| `GET /v1/sandboxes/{id}/repos` | — | `200 { id, repos: string[] }`: the GitHub repositories (`owner/name`) its git may open |
+| `PUT /v1/sandboxes/{id}/repos` | JSON `{ "repos": string[] }`, at most 20, replacing the list; each one the org's RayTrace GitHub App is installed on | `200 { id, repos }`; `400` naming the repository that cannot be attached |
 
 ### Commands
 
