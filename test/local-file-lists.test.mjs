@@ -24,3 +24,61 @@ test('the same file cannot be given to both lists in one command', () => {
 test('lists that were never set start empty', () => {
   assert.deepEqual(changedLists({}, { report: ['a.js'] }), { restricted: [], watched: ['a.js'] });
 });
+
+test('repeated slashes, . segments and trailing slashes collapse the way the VM stores them', () => {
+  assert.deepEqual(
+    changedLists({}, { restrict: ['src//a.js', 'src/./b.js', './src/c.js/', '././d.js', 'e//f/./g//'] }),
+    { restricted: ['d.js', 'e/f/g', 'src/a.js', 'src/b.js', 'src/c.js'], watched: [] },
+  );
+});
+
+test('--clear finds a file however its path was written', () => {
+  assert.deepEqual(
+    changedLists({ restricted: ['src/a.js'], watched: ['src/b.js'] }, { clear: ['src//a.js', 'src/./b.js'] }),
+    { restricted: [], watched: [] },
+  );
+});
+
+test('the same file written two ways is still caught as given to both lists', () => {
+  assert.throws(() => changedLists({ restricted: [] }, { restrict: ['src//a.js'], report: ['src/a.js'] }), /src\/a\.js is given to both --restrict and --report/);
+  assert.throws(() => changedLists({}, { restrict: ['src/./a.js'], report: ['./src//a.js/'] }), /both --restrict and --report/);
+});
+
+test('Windows separators become /', () => {
+  assert.deepEqual(
+    changedLists({}, { restrict: ['src\\a.js', '.\\b.js'], report: ['src\\\\deep\\c.js'] }),
+    { restricted: ['b.js', 'src/a.js'], watched: ['src/deep/c.js'] },
+  );
+});
+
+test('a path that is only the project root, or empty, is ignored as before', () => {
+  assert.deepEqual(changedLists({ restricted: ['x'], watched: [] }, { restrict: ['.', './', '', '  '] }), { restricted: ['x'], watched: [] });
+});
+
+test('names that merely contain dots are kept', () => {
+  assert.deepEqual(
+    changedLists({}, { restrict: ['.env', 'a..b', '..hidden', 'src/.config', 'dir./x'] }),
+    { restricted: ['..hidden', '.env', 'a..b', 'dir./x', 'src/.config'], watched: [] },
+  );
+});
+
+test('a path that leaves the project root is refused, naming the flag and the path', () => {
+  const leaves = (flag, path) => assert.throws(
+    () => changedLists({}, { [flag]: [path] }),
+    new Error(`--${flag} ${path}: paths are from the project's root and cannot leave it.`),
+  );
+  leaves('restrict', '../x');
+  leaves('report', '/etc/passwd');
+  leaves('clear', 'a/../b');   // the VM refuses any .. segment, even one that stays inside
+  leaves('restrict', 'a/..');
+  leaves('report', '\\etc\\passwd');   // absolute once \ is read as /
+  leaves('restrict', '..\\x');
+});
+
+test('a path with a NUL character is refused', () => {
+  assert.throws(() => changedLists({}, { restrict: ['a\0b'] }), new Error('--restrict a\\0b: a path cannot contain a NUL character.'));
+});
+
+test('one bad path refuses the whole change, so nothing is half applied', () => {
+  assert.throws(() => changedLists({ restricted: ['keep.js'], watched: [] }, { restrict: ['ok.js', '../bad'] }), /cannot leave it/);
+});

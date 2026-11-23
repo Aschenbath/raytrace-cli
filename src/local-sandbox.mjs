@@ -13,7 +13,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, posix } from 'node:path';
 import { AGENTS } from './agents.mjs';
 import { paths } from './paths.mjs';
 import { portInUse, runningPid, start as startProxy, stop as stopProxy } from './proxy-process.mjs';
@@ -279,15 +279,29 @@ export async function start(id) {
   say(`${registry()[id].name} running`);
 }
 
-/** A path as the lists keep it: from the project's root, with no ./ or trailing slash. */
-const listPath = (path) => String(path).trim().replace(/^(\.\/)+/, '').replace(/\/+$/, '');
+/**
+ * A path as the lists keep it, and as the VM will: from the project's root,
+ * `/`-separated, with no `.` segments, repeated or trailing slashes. Paths the
+ * VM would refuse (absolute, a `..` segment, NUL) are refused here, naming the flag.
+ */
+function listPath(path, flag) {
+  const given = String(path).trim().replace(/\\/g, '/');
+  const shown = `--${flag} ${String(path).trim().replace(/\0/g, '\\0')}`;
+  if (given.includes('\0')) throw new Error(`${shown}: a path cannot contain a NUL character.`);
+  if (given.startsWith('/') || given.split('/').includes('..')) {
+    throw new Error(`${shown}: paths are from the project's root and cannot leave it.`);
+  }
+  const clean = posix.normalize(given).replace(/\/+$/, '');
+  return clean === '.' ? '' : clean;
+}
 
 /**
  * The two lists after a change. A file is on one list at most: restricting a
  * reported file moves it, and the other way round. `clear` takes it off both.
  */
 export function changedLists(current, { restrict = [], report = [], clear = [] } = {}) {
-  const [toRestrict, toReport, toClear] = [restrict, report, clear].map((paths) => paths.map(listPath).filter(Boolean));
+  const [toRestrict, toReport, toClear] = [['restrict', restrict], ['report', report], ['clear', clear]]
+    .map(([flag, paths]) => paths.map((path) => listPath(path, flag)).filter(Boolean));
   const both = toRestrict.filter((path) => toReport.includes(path));
   if (both.length) throw new Error(`${both[0]} is given to both --restrict and --report; pick one.`);
   const gone = new Set([...toClear, ...toRestrict, ...toReport]);
@@ -304,11 +318,13 @@ export function changedLists(current, { restrict = [], report = [], clear = [] }
  */
 export async function files(ref, change = {}) {
   const id = pickId(ref);
+  const changing = ['restrict', 'report', 'clear'].some((key) => change[key]?.length);
+  // Refuse a bad path before the VM is started for it.
+  if (changing) changedLists({}, change);
   ensureVm();
   const { name } = registry()[id];
   const read = (args, options) => JSON.parse(projects(args, options).stdout);
   let lists = read(['guardrails', id]);
-  const changing = ['restrict', 'report', 'clear'].some((key) => change[key]?.length);
   if (changing) {
     const wanted = changedLists(lists, change);
     lists = read(['set-guardrails', id], { input: JSON.stringify(wanted) });
