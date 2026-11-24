@@ -12,7 +12,7 @@ function escapeHtml(str) {
 }
 
 function safeCodeBlock(content, lang = '') {
-  const text = String(content ?? '');
+  const text = content !== null && typeof content === 'object' ? JSON.stringify(content, null, 2) : String(content ?? '');
   const matches = text.match(/`+/g) || [];
   let maxBackticks = 3;
   for (const m of matches) {
