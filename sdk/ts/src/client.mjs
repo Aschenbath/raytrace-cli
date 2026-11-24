@@ -194,9 +194,10 @@ export function archiveFromDirectory(dirPath) {
         walk(abs, rel);
       } else if (entry.isFile() && !isSecretFile(entry.name)) {
         const st = statSync(abs);
-        if (st.size <= 25 * 1024 * 1024) {
-          files[rel] = readFileSync(abs);
+        if (st.size > 25 * 1024 * 1024) {
+          throw new Error(`Project file ${rel} exceeds the 25 MiB size limit`);
         }
+        files[rel] = readFileSync(abs);
       }
     }
   }

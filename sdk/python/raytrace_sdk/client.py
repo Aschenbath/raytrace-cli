@@ -205,8 +205,9 @@ def archive_from_directory(directory: str | os.PathLike[str]) -> bytes:
         if (any(part in DEFAULT_EXCLUDED for part in rel.parts) or path.is_symlink() or not path.is_file()
                 or is_secret_file(path.name)):
             continue
-        if path.stat().st_size <= 25 * 1024 * 1024:
-            files[rel.as_posix()] = path.read_bytes()
+        if path.stat().st_size > 25 * 1024 * 1024:
+            raise ValueError(f'Project file {rel.as_posix()} exceeds the 25 MiB size limit')
+        files[rel.as_posix()] = path.read_bytes()
     return build_tar_gz(files)
 
 
