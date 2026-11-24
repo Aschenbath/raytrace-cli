@@ -58,7 +58,7 @@ export class Sandbox {
       { body: { command, timeout_seconds: timeoutSeconds, request_id: requestId } },
     );
     let job = created;
-    while (!TERMINAL_STATES.has(job.state)) {
+    while (!TERMINAL_STATES.has(job.state) || job.recovery_pending) {
       await sleep(pollIntervalMs);
       const { data: latest } = await this._client.request(
         'GET',
