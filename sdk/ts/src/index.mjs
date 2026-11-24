@@ -58,7 +58,7 @@ export class Sandbox {
       { body: { command, timeout_seconds: timeoutSeconds, request_id: requestId } },
     );
     let job = created;
-    while (!TERMINAL_STATES.has(job.state)) {
+    while (!TERMINAL_STATES.has(job.state) || job.recovery_pending) {
       await sleep(pollIntervalMs);
       const { data: latest } = await this._client.request(
         'GET',
@@ -110,12 +110,12 @@ export class Sandbox {
         await sleep(pollIntervalMs);
         const { data: list } = await this._client.request('GET', '/v1/sandboxes');
         const current = (list || []).find(item => item.id === this.id);
-        if (!current) break;
+        if (!current) throw new RayTraceError(`Sandbox ${this.id} disappeared while restoring`, { status: 404 });
         this.info = current;
-        if (current.status === 'running' || current.restore_error || current.status === 'archived') {
-          if (current.restore_error) {
-            throw new RayTraceError(`Archive restore failed: ${current.restore_error}`, { status: 500, body: current });
-          }
+        if (current.restore_error) {
+          throw new RayTraceError(`Archive restore failed: ${current.restore_error}`, { status: 500, body: current });
+        }
+        if (!current.restoring && (current.status === 'running' || current.status === 'archived')) {
           break;
         }
       }

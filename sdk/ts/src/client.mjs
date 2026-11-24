@@ -62,12 +62,12 @@ function buildTarGzWithModes(files, modes = new Map()) {
   }
   for (const [rawPath, content] of entries) {
     const rel = String(rawPath).replace(/^\/+/, '');
-    if (!rel || rel.includes('..') || rel.length > 99) {
+    if (!rel || rel.includes('..') || Buffer.byteLength(rel, 'utf8') > 99) {
       throw new Error(`Invalid archive file path: ${rawPath}`);
     }
     const data = Buffer.isBuffer(content) ? content : Buffer.from(content);
     const header = Buffer.alloc(512, 0);
-    header.write(rel, 0, Math.min(rel.length, 100), 'utf8');
+    header.write(rel, 0, 100, 'utf8');
     writeOctal(header, 100, 8, modes.get(rawPath) ?? 0o644);
     writeOctal(header, 108, 8, 1000);
     writeOctal(header, 116, 8, 1000);
@@ -187,7 +187,7 @@ export async function archiveFromRepo(repo, { ref = undefined } = {}) {
 }
 
 export function archiveFromDirectory(dirPath) {
-  const files = {};
+  const files = Object.create(null);
   const modes = new Map();
   function walk(absDir, relPrefix) {
     for (const entry of readdirSync(absDir, { withFileTypes: true })) {
@@ -199,10 +199,11 @@ export function archiveFromDirectory(dirPath) {
         walk(abs, rel);
       } else if (entry.isFile() && !isSecretFile(entry.name)) {
         const st = statSync(abs);
-        if (st.size <= 25 * 1024 * 1024) {
-          files[rel] = readFileSync(abs);
-          modes.set(rel, st.mode & 0o777);
+        if (st.size > 25 * 1024 * 1024) {
+          throw new Error(`Project file ${rel} exceeds the 25 MiB size limit`);
         }
+        files[rel] = readFileSync(abs);
+        modes.set(rel, st.mode & 0o777);
       }
     }
   }

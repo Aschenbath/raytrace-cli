@@ -211,9 +211,10 @@ def archive_from_directory(directory: str | os.PathLike[str]) -> bytes:
                 or is_secret_file(path.name)):
             continue
         file_stat = path.stat()
-        if file_stat.st_size <= 25 * 1024 * 1024:
-            files[rel.as_posix()] = path.read_bytes()
-            modes[rel.as_posix()] = file_stat.st_mode & 0o777
+        if file_stat.st_size > 25 * 1024 * 1024:
+            raise ValueError(f'Project file {rel.as_posix()} exceeds the 25 MiB size limit')
+        files[rel.as_posix()] = path.read_bytes()
+        modes[rel.as_posix()] = file_stat.st_mode & 0o777
     return _build_tar_gz(files, modes)
 
 
@@ -313,7 +314,7 @@ class Sandbox:
             'POST', f'/v1/sandboxes/{urllib.parse.quote(self.id)}/commands',
             body={'command': command, 'timeout_seconds': timeout_seconds, 'request_id': req_id},
         )
-        while job.get('state') not in TERMINAL_STATES:
+        while job.get('state') not in TERMINAL_STATES or job.get('recovery_pending'):
             time.sleep(poll_interval)
             _, job = self._t.request(
                 'GET',
@@ -360,11 +361,11 @@ class Sandbox:
                 _, items = self._t.request('GET', '/v1/sandboxes')
                 current = next((x for x in (items or []) if x.get('id') == self.id), None)
                 if not current:
-                    break
+                    raise RayTraceError(f'Sandbox {self.id} disappeared while restoring', status=404)
                 self.info = current
                 if current.get('restore_error'):
                     raise RayTraceError(f"Archive restore failed: {current['restore_error']}", status=500, body=current)
-                if current.get('status') in ('running', 'archived'):
+                if not current.get('restoring') and current.get('status') in ('running', 'archived'):
                     break
         return self.info
 
@@ -437,7 +438,7 @@ class _SandboxesResource:
         if connect:
             try:
                 sandbox.git = sandbox.connect_repo(repo, ref=ref)
-            except (RayTraceError, ValueError) as error:
+            except (RayTraceError, ValueError, OSError) as error:
                 # The sandbox exists either way: say so, and hand it over to retry or destroy.
                 status = error.status if isinstance(error, RayTraceError) else 0
                 failed = RayTraceError(f'Sandbox {sandbox.id} was created, but '
