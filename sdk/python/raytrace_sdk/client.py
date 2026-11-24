@@ -306,7 +306,7 @@ class Sandbox:
             'POST', f'/v1/sandboxes/{urllib.parse.quote(self.id)}/commands',
             body={'command': command, 'timeout_seconds': timeout_seconds, 'request_id': req_id},
         )
-        while job.get('state') not in TERMINAL_STATES:
+        while job.get('state') not in TERMINAL_STATES or job.get('recovery_pending'):
             time.sleep(poll_interval)
             _, job = self._t.request(
                 'GET',
