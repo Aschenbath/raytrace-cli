@@ -58,12 +58,12 @@ export function buildTarGz(files) {
   }
   for (const [rawPath, content] of entries) {
     const rel = String(rawPath).replace(/^\/+/, '');
-    if (!rel || rel.includes('..') || rel.length > 99) {
+    if (!rel || rel.includes('..') || Buffer.byteLength(rel, 'utf8') > 99) {
       throw new Error(`Invalid archive file path: ${rawPath}`);
     }
     const data = Buffer.isBuffer(content) ? content : Buffer.from(content);
     const header = Buffer.alloc(512, 0);
-    header.write(rel, 0, Math.min(rel.length, 100), 'utf8');
+    header.write(rel, 0, 100, 'utf8');
     writeOctal(header, 100, 8, 0o644);
     writeOctal(header, 108, 8, 1000);
     writeOctal(header, 116, 8, 1000);
