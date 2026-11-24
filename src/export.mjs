@@ -56,7 +56,7 @@ export function formatTraceJson(trace) {
           kind: e.kind,
           title: e.title,
           status: e.status,
-          timestamp: e.timestamp,
+          timestamp: e.time ?? e.timestamp,
           raw,
         };
       }),
@@ -118,7 +118,7 @@ export function formatTraceMarkdown(trace) {
       lines.push(`### ${escapeHtml(ev.title)}`);
       lines.push(`- **Kind:** \`${ev.kind}\``);
       lines.push(`- **Status:** \`${ev.status || 'unknown'}\``);
-      lines.push(`- **Timestamp:** ${ev.timestamp || 'unknown'}`);
+      lines.push(`- **Timestamp:** ${ev.time ?? ev.timestamp ?? 'unknown'}`);
 
       let rawObj = null;
       if (ev.raw) {
