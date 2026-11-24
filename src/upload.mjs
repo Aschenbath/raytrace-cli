@@ -94,17 +94,21 @@ export async function sendChunks({ url, key, sandbox, name, file, size, sha256, 
       const { bytesRead } = await handle.read(buffer, 0, Math.min(CHUNK, size - offset), offset);
       const query = new URLSearchParams({ sandbox, name, sha256, size: String(size), offset: String(offset) });
       let response;
+      let data;
       try {
         response = await send(new URL(`/v1/evidence/import?${query}`, url), {
           method: 'POST', body: buffer.subarray(0, bytesRead),
           headers: { authorization: `Bearer ${key}`, 'content-type': 'application/gzip' },
+        });
+        data = await response.json().catch((error) => {
+          if (response.ok) throw error;
+          return {};
         });
       } catch (error) {
         if (++failures > RETRIES) throw new Error(`Upload interrupted: ${error.message}. Run it again to continue where it stopped.`);
         await new Promise((resolve) => { setTimeout(resolve, 500 * 2 ** failures); });
         continue;
       }
-      const data = await response.json().catch(() => ({}));
       if (response.status === 409 && data.code === 'upload_offset') { offset = data.offset; onProgress(offset); continue; }
       if (response.status >= 500 && ++failures <= RETRIES) {
         await new Promise((resolve) => { setTimeout(resolve, 500 * 2 ** failures); });
