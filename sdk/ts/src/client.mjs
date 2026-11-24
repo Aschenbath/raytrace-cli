@@ -51,6 +51,10 @@ function writeOctal(buf, offset, length, value) {
  * Accepts a map of relative POSIX paths -> string | Uint8Array | Buffer.
  */
 export function buildTarGz(files) {
+  return buildTarGzWithModes(files);
+}
+
+function buildTarGzWithModes(files, modes = new Map()) {
   const chunks = [];
   const entries = Object.entries(files || {});
   if (!entries.length) {
@@ -64,7 +68,7 @@ export function buildTarGz(files) {
     const data = Buffer.isBuffer(content) ? content : Buffer.from(content);
     const header = Buffer.alloc(512, 0);
     header.write(rel, 0, Math.min(rel.length, 100), 'utf8');
-    writeOctal(header, 100, 8, 0o644);
+    writeOctal(header, 100, 8, modes.get(rawPath) ?? 0o644);
     writeOctal(header, 108, 8, 1000);
     writeOctal(header, 116, 8, 1000);
     writeOctal(header, 124, 12, data.length);
@@ -184,6 +188,7 @@ export async function archiveFromRepo(repo, { ref = undefined } = {}) {
 
 export function archiveFromDirectory(dirPath) {
   const files = {};
+  const modes = new Map();
   function walk(absDir, relPrefix) {
     for (const entry of readdirSync(absDir, { withFileTypes: true })) {
       if (DEFAULT_EXCLUDED.has(entry.name)) continue;
@@ -196,12 +201,13 @@ export function archiveFromDirectory(dirPath) {
         const st = statSync(abs);
         if (st.size <= 25 * 1024 * 1024) {
           files[rel] = readFileSync(abs);
+          modes.set(rel, st.mode & 0o777);
         }
       }
     }
   }
   walk(dirPath, '');
-  return buildTarGz(files);
+  return buildTarGzWithModes(files, modes);
 }
 
 export class RayTraceClient {
