@@ -34,11 +34,12 @@ export async function sharePrompt(traceId, { sandboxId, allowFork = false } = {}
   }
 
   const result = await call('POST', '/v1/shares', {
-    body: {
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
       trace_id: cleanTrace,
       sandbox_id: targetSandbox,
       allow_fork: Boolean(allowFork),
-    },
+    }),
   });
 
   const fullUrl = `${DASHBOARD}${result.url}`;
