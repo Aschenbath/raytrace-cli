@@ -353,11 +353,11 @@ class Sandbox:
                 _, items = self._t.request('GET', '/v1/sandboxes')
                 current = next((x for x in (items or []) if x.get('id') == self.id), None)
                 if not current:
-                    break
+                    raise RayTraceError(f'Sandbox {self.id} disappeared while restoring', status=404)
                 self.info = current
                 if current.get('restore_error'):
                     raise RayTraceError(f"Archive restore failed: {current['restore_error']}", status=500, body=current)
-                if current.get('status') in ('running', 'archived'):
+                if not current.get('restoring') and current.get('status') in ('running', 'archived'):
                     break
         return self.info
 
