@@ -183,7 +183,7 @@ export async function archiveFromRepo(repo, { ref = undefined } = {}) {
 }
 
 export function archiveFromDirectory(dirPath) {
-  const files = {};
+  const files = Object.create(null);
   function walk(absDir, relPrefix) {
     for (const entry of readdirSync(absDir, { withFileTypes: true })) {
       if (DEFAULT_EXCLUDED.has(entry.name)) continue;
