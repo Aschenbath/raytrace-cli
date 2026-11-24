@@ -45,9 +45,15 @@ export function snapshotEvidences(database = paths.database) {
   if (!existsSync(database)) throw new Error(`No evidences recorded yet (${database} does not exist). Run an agent in a local sandbox first.`);
   const dir = mkdtempSync(join(tmpdir(), 'raytrace-upload-'));
   const plain = join(dir, 'evidence.db');
-  const source = new DatabaseSync(database, { readOnly: true });
-  try { source.exec(`VACUUM INTO '${plain.replaceAll("'", "''")}'`); } finally { source.close(); }
-  return { dir, plain };
+  try {
+    const source = new DatabaseSync(database, { readOnly: true });
+    try { source.exec(`VACUUM INTO '${plain.replaceAll("'", "''")}'`); } finally { source.close(); }
+    return { dir, plain };
+  } catch (error) {
+    // The caller can only clean up a snapshot after this function returns it.
+    rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 /** Trims the snapshot to one sandbox, so nothing of any other sandbox or
