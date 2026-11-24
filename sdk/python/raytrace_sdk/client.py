@@ -430,7 +430,7 @@ class _SandboxesResource:
         if connect:
             try:
                 sandbox.git = sandbox.connect_repo(repo, ref=ref)
-            except (RayTraceError, ValueError) as error:
+            except (RayTraceError, ValueError, OSError) as error:
                 # The sandbox exists either way: say so, and hand it over to retry or destroy.
                 status = error.status if isinstance(error, RayTraceError) else 0
                 failed = RayTraceError(f'Sandbox {sandbox.id} was created, but '
