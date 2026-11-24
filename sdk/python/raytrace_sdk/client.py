@@ -68,6 +68,10 @@ class CommandResult:
 
 def build_tar_gz(files: Mapping[str, str | bytes]) -> bytes:
     """Packs `{relative_path: content}` into a normalized `.tar.gz` archive."""
+    return _build_tar_gz(files)
+
+
+def _build_tar_gz(files: Mapping[str, str | bytes], modes: Mapping[str, int] | None = None) -> bytes:
     if not files:
         raise ValueError('Archive must contain at least one file')
     buf = io.BytesIO()
@@ -80,7 +84,7 @@ def build_tar_gz(files: Mapping[str, str | bytes]) -> bytes:
                 data = content.encode('utf-8') if isinstance(content, str) else bytes(content)
                 info = tarfile.TarInfo(rel)
                 info.size = len(data)
-                info.mode = 0o644
+                info.mode = modes.get(raw_path, 0o644) if modes is not None else 0o644
                 info.uid = 1000
                 info.gid = 1000
                 tar.addfile(info, io.BytesIO(data))
@@ -200,15 +204,18 @@ def archive_from_repo(repo: str, *, ref: str | None = None) -> bytes:
 def archive_from_directory(directory: str | os.PathLike[str]) -> bytes:
     root = Path(directory).resolve()
     files: dict[str, bytes] = {}
+    modes: dict[str, int] = {}
     for path in sorted(root.rglob('*')):
         rel = path.relative_to(root)
         if (any(part in DEFAULT_EXCLUDED for part in rel.parts) or path.is_symlink() or not path.is_file()
                 or is_secret_file(path.name)):
             continue
-        if path.stat().st_size > 25 * 1024 * 1024:
+        file_stat = path.stat()
+        if file_stat.st_size > 25 * 1024 * 1024:
             raise ValueError(f'Project file {rel.as_posix()} exceeds the 25 MiB size limit')
         files[rel.as_posix()] = path.read_bytes()
-    return build_tar_gz(files)
+        modes[rel.as_posix()] = file_stat.st_mode & 0o777
+    return _build_tar_gz(files, modes)
 
 
 class _Transport:
