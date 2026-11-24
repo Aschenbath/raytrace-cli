@@ -26,7 +26,7 @@
       "import": "./src/index.mjs"
     },
     "./client": {
-      "types": "./src/index.d.ts",
+      "types": "./src/client.d.ts",
       "import": "./src/client.mjs"
     }
   },
