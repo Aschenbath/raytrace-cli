@@ -14,6 +14,9 @@ test('quoted field values stay together without becoming free-text phrases', () 
   assert.deepEqual(parsed.errors, []);
   assert.equal(parseSearchQuery('file:"a|b.js" | stats count').pipe.type, 'stats');
   assert.equal(parseSearchQuery('file:"a|b.js" | stats count').filters[0].value, 'a|b.js');
+  const unknown = parseSearchQuery('bogus:"foo*"');
+  assert.deepEqual(unknown.errors, ['Unknown field: bogus']);
+  assert.deepEqual(unknown.text, [{ value: 'bogus:foo*', phrase: true, prefix: false, negated: false }]);
 });
 
 test('search finds and excludes quoted field values with spaces', (t) => {
