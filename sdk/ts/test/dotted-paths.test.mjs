@@ -12,7 +12,7 @@ test('archive paths may contain consecutive dots inside a filename', () => {
 });
 
 test('parent-directory path components are still rejected', () => {
-  for (const path of ['..', '../data.txt', 'src/../data.txt', 'src/..', '../../data.txt']) {
+  for (const path of ['..', '../data.txt', 'src/../data.txt', 'src/..', '../../data.txt', '..\\data.txt', 'src\\..\\data.txt', 'src\\..']) {
     assert.throws(() => buildTarGz({ [path]: 'contents' }), /Invalid archive file path/);
   }
 });
