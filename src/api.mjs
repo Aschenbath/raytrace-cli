@@ -58,13 +58,13 @@ export async function call(method, path, { body, headers = {}, autoLogin = true 
     throw unreachable(url);
   }
   let data = {};
-  if (text) {
+  if (text.trim()) {
     try {
       data = JSON.parse(text);
     } catch {
       if (response.ok) throw new ApiError('Invalid JSON response from RayTrace.', { status: response.status });
     }
   }
-  if (!response.ok) throw new ApiError(data.error || `HTTP ${response.status}`, { status: response.status, data });
+  if (!response.ok) throw new ApiError(data?.error || `HTTP ${response.status}`, { status: response.status, data });
   return data;
 }

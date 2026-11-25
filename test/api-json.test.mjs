@@ -29,15 +29,20 @@ test('a response body read failure is reported as a connection failure', async t
   await assert.rejects(call('GET', '/v1/sandboxes', { autoLogin: false }), /Cannot reach RayTrace/);
 });
 
-test('empty successful responses remain supported', async t => {
+test('empty and whitespace-only successful responses remain supported', async t => {
   setup(t, new Response(null, { status: 204 }));
+  assert.deepEqual(await call('DELETE', '/v1/sandboxes/test', { autoLogin: false }), {});
+  setup(t, new Response('  \n', { status: 200 }));
   assert.deepEqual(await call('DELETE', '/v1/sandboxes/test', { autoLogin: false }), {});
 });
 
-test('non-JSON HTTP errors retain their status', async t => {
+test('non-JSON and null-JSON HTTP errors retain their status', async t => {
   setup(t, new Response('<h1>Bad Gateway</h1>', { status: 502 }));
   await assert.rejects(call('GET', '/v1/sandboxes', { autoLogin: false }),
     error => error instanceof ApiError && error.status === 502 && error.message === 'HTTP 502');
+  setup(t, new Response('null', { status: 500 }));
+  await assert.rejects(call('GET', '/v1/sandboxes', { autoLogin: false }),
+    error => error instanceof ApiError && error.status === 500 && error.message === 'HTTP 500');
 });
 
 test('valid responses still return parsed data', async t => {
