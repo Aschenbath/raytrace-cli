@@ -209,6 +209,7 @@ function buildWhere(parsed, { fromMs = null, toMs = null, exclude = null } = {})
   let to = toMs;
   for (const filter of parsed.filters) {
     if (filter.field === exclude) continue;
+    const clauseIndex = clauses.length;
     const not = filter.negated ? 'NOT ' : '';
     if (filter.field === 'after') { const b = dateBound(filter.value, false); if (b != null) from = from == null ? b : Math.max(from, b); continue; }
     if (filter.field === 'before') { const b = dateBound(filter.value, true); if (b != null) to = to == null ? b : Math.min(to, b); continue; }
@@ -225,6 +226,10 @@ function buildWhere(parsed, { fromMs = null, toMs = null, exclude = null } = {})
       clauses.push(`${not}(failure_signature LIKE ? ESCAPE '\\')`); params.push(`${likeEscape(filter.value.replace(/\*/g, ''))}%`);
     } else if (filter.field === 'session') {
       clauses.push(`${not}(session_id = ? OR session_external = ?)`); params.push(filter.value, filter.value);
+    }
+    // A missing field does not match, so its negation must include the event.
+    if (filter.negated && clauses.length > clauseIndex) {
+      clauses[clauseIndex] = `COALESCE(${clauses[clauseIndex]}, 1)`;
     }
   }
   if (from != null) { clauses.push('ts_ms >= ?'); params.push(from); }
